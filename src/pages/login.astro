@@ -1,0 +1,158 @@
+---
+import { env } from "cloudflare:workers";
+import {
+	SESSION_COOKIE,
+	SESSION_TTL_MS,
+	createSessionToken,
+	verifyCredentials,
+	verifySessionToken,
+} from "../utils/admin-auth";
+
+export const prerender = false;
+
+function workerVar(name: string): string | undefined {
+	try {
+		return (env as unknown as Record<string, string | undefined>)[name];
+	} catch {
+		return undefined;
+	}
+}
+
+const password = workerVar("ADMIN_PASSWORD");
+// Mirror the middleware: with no password configured the admin area is disabled.
+if (!password) {
+	return new Response("Not found", { status: 404 });
+}
+const username = workerVar("ADMIN_USERNAME") || "admin";
+const secure = Astro.url.protocol === "https:";
+
+// Already signed in? Skip the form.
+const existing = Astro.cookies.get(SESSION_COOKIE)?.value;
+if (await verifySessionToken(existing, password)) {
+	return Astro.redirect("/", 302);
+}
+
+let error = false;
+
+if (Astro.request.method === "POST") {
+	const form = await Astro.request.formData();
+	const user = String(form.get("username") ?? "").trim();
+	const pass = String(form.get("password") ?? "");
+
+	if (verifyCredentials(user, pass, username, password)) {
+		const token = await createSessionToken(password);
+		Astro.cookies.set(SESSION_COOKIE, token, {
+			httpOnly: true,
+			secure,
+			sameSite: "lax",
+			path: "/",
+			maxAge: Math.floor(SESSION_TTL_MS / 1000),
+		});
+		return Astro.redirect("/", 302);
+	}
+	error = true;
+}
+---
+
+<!DOCTYPE html>
+<html class="light" lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
+		<meta name="robots" content="noindex, nofollow" />
+		<title>Sign in | CureVà Admin</title>
+		<script is:inline src="https://cdn.tailwindcss.com"></script>
+		<link
+			href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap"
+			rel="stylesheet"
+		/>
+		<link
+			href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+			rel="stylesheet"
+		/>
+		<style is:inline>
+			.material-symbols-outlined {
+				font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+				vertical-align: middle;
+			}
+			input:focus {
+				box-shadow: 0 0 0 2px rgba(164, 208, 219, 0.4) !important;
+				border-color: #3a656e !important;
+			}
+		</style>
+		<script is:inline id="tailwind-config">
+			tailwind.config = {
+				theme: {
+					extend: {
+						colors: {
+							primary: "#3a656e",
+							"primary-container": "#a4d0db",
+							background: "#f0fbff",
+							"surface-container": "#dff1f7",
+							"on-surface": "#0d1e22",
+							"on-surface-variant": "#41484a",
+							"on-primary": "#ffffff",
+							"outline-variant": "#c0c8ca",
+						},
+						fontFamily: { sans: ["DM Sans", "sans-serif"] },
+					},
+				},
+			};
+		</script>
+	</head>
+	<body class="bg-background text-on-surface font-sans min-h-screen flex items-center justify-center px-4">
+		<main class="w-full max-w-sm">
+			<div class="bg-white rounded-2xl shadow-[0_20px_40px_0_rgba(164,208,219,0.25)] border border-outline-variant/60 overflow-hidden">
+				<div class="bg-primary text-on-primary px-8 py-7 text-center">
+					<div class="w-12 h-12 rounded-full bg-on-primary/15 flex items-center justify-center mx-auto mb-3">
+						<span class="material-symbols-outlined text-2xl">lock</span>
+					</div>
+					<h1 class="text-xl font-bold tracking-tight">CureVà Admin</h1>
+					<p class="text-sm opacity-80">Email dashboard sign-in</p>
+				</div>
+
+				<form method="POST" class="px-8 py-7 space-y-5" novalidate>
+					{error && (
+						<div class="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 text-red-800 px-3 py-2.5 text-sm">
+							<span class="material-symbols-outlined text-base">error</span>
+							Incorrect username or password.
+						</div>
+					)}
+
+					<label class="block">
+						<span class="text-xs uppercase tracking-wider text-on-surface-variant font-medium">Username</span>
+						<input
+							name="username"
+							type="text"
+							autocomplete="username"
+							value="admin"
+							required
+							class="mt-1.5 w-full rounded-lg border border-outline-variant bg-background px-3.5 py-2.5 text-sm outline-none transition"
+						/>
+					</label>
+
+					<label class="block">
+						<span class="text-xs uppercase tracking-wider text-on-surface-variant font-medium">Password</span>
+						<input
+							name="password"
+							type="password"
+							autocomplete="current-password"
+							required
+							autofocus
+							class="mt-1.5 w-full rounded-lg border border-outline-variant bg-background px-3.5 py-2.5 text-sm outline-none transition"
+						/>
+					</label>
+
+					<button
+						type="submit"
+						class="w-full rounded-full bg-primary text-on-primary py-3 text-sm font-semibold hover:opacity-90 active:scale-[0.99] transition flex items-center justify-center gap-2"
+					>
+						<span class="material-symbols-outlined text-base">login</span>
+						Sign in
+					</button>
+				</form>
+			</div>
+			<p class="text-center text-xs text-on-surface-variant/70 mt-5">CureVà Beauty Lounge · Staff only</p>
+		</main>
+	</body>
+</html>

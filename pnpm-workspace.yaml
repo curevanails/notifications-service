@@ -1,0 +1,6 @@
+# Build scripts: allow only what the Cloudflare/Astro build needs; rest false
+# so strictDepBuilds (pnpm >=10.26 / 11) passes.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false

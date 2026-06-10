@@ -1,0 +1,38 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "notify",
+	"main": "./src/worker.ts",
+	"compatibility_date": "2026-02-24",
+	"compatibility_flags": ["nodejs_compat"],
+	// Cron Trigger: fire due scheduled campaigns every 5 minutes. The handler
+	// lives in src/worker.ts → runDueCampaigns(). Scheduling times are stored as
+	// absolute Unix ms (the UI converts from Utah / America/Denver), so the cron
+	// cadence is timezone-independent.
+	"triggers": {
+		"crons": ["*/5 * * * *"],
+	},
+	// Shares the same D1 as the CureVà site — the `waitlist` table IS the
+	// subscriber list and `email_logs` / `suppression_list` live alongside it.
+	// Point this at the same database the main site uses.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "curevanails",
+			"database_id": "fcc8f06b-3ddf-4cae-953f-b9fce243eed8",
+		},
+	],
+	// Astro's Cloudflare adapter enables sessions backed by a KV namespace
+	// named SESSION. (The admin auth here uses signed cookies, not Astro
+	// sessions, but the binding must exist for the adapter.) `wrangler dev`
+	// auto-provisions a local one; create/bind a real namespace for production.
+	"kv_namespaces": [
+		{
+			"binding": "SESSION",
+			"id": "7dc602c72cc14651858c96a67e3c7997",
+		},
+	],
+	// SES credentials are SECRETS, not vars — set with `wrangler secret put`.
+	// See docs/EMAIL.md:
+	//   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, PUBLIC_SITE_URL
+	// Admin auth secret (see README): ADMIN_PASSWORD (required), ADMIN_USERNAME.
+}

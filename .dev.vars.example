@@ -1,0 +1,13 @@
+# AWS SES (email sending). Copy to `.dev.vars` and fill to test real sends locally.
+# In production set these as Worker secrets (see docs/EMAIL.md), NOT vars.
+# AWS_REGION=us-east-1
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+
+# Public origin used to build unsubscribe links in emails (optional).
+# PUBLIC_SITE_URL=https://curevanails-tech.workers.dev
+
+# Admin dashboard auth. ADMIN_PASSWORD is required to enable /admin (if unset,
+# the admin area returns 404). ADMIN_USERNAME is optional (defaults to "admin").
+ADMIN_PASSWORD=devpassword
+# ADMIN_USERNAME=admin

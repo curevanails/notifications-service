@@ -1,0 +1,1154 @@
+---
+import { env } from "cloudflare:workers";
+import { ensureEmailSchema, type LogStatus } from "../utils/email-db";
+
+// Server-rendered, never cached. Gated by the admin auth in src/middleware.ts.
+export const prerender = false;
+
+interface TemplateRow {
+	id: string;
+	name: string;
+	subject: string;
+	html: string;
+	variables: string | null;
+}
+interface LogRow {
+	id: string;
+	email: string;
+	template_id: string | null;
+	status: string;
+	sent_at: number | null;
+	delivered_at: number | null;
+	opened_at: number | null;
+	bounce_reason: string | null;
+	error_message: string | null;
+}
+interface SuppressionRow {
+	email: string;
+	reason: string;
+	added_at: number;
+}
+interface Stats {
+	total: number;
+	sent: number;
+	delivered: number;
+	opened: number;
+	clicked: number;
+	bounced: number;
+	complained: number;
+	failed: number;
+}
+interface TemplateStat {
+	template_id: string | null;
+	sent: number;
+	delivered: number;
+	opened: number;
+	clicked: number;
+	bounced: number;
+}
+interface CampaignRow {
+	id: string;
+	template_id: string | null;
+	audience: string;
+	scheduled_at: number;
+	status: string;
+	total: number | null;
+	sent: number | null;
+	failed: number | null;
+	error_message: string | null;
+}
+
+const db = env.DB as D1Database;
+const envRecord = env as unknown as Record<string, unknown>;
+const sesConfigured =
+	typeof envRecord.AWS_REGION === "string" &&
+	typeof envRecord.AWS_ACCESS_KEY_ID === "string" &&
+	typeof envRecord.AWS_SECRET_ACCESS_KEY === "string";
+
+let templates: TemplateRow[] = [];
+let logs: LogRow[] = [];
+let suppressed: SuppressionRow[] = [];
+let counts = { all: 0, waiting: 0, invited: 0, redeemed: 0 };
+let stats: Stats = { total: 0, sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, complained: 0, failed: 0 };
+let templateStats: TemplateStat[] = [];
+let campaigns: CampaignRow[] = [];
+let loadError: string | null = null;
+
+try {
+	await ensureEmailSchema(db);
+	templates = (
+		await db.prepare("SELECT id, name, subject, html, variables FROM email_templates ORDER BY name").all<TemplateRow>()
+	).results ?? [];
+	logs = (
+		await db
+			.prepare(
+				"SELECT id, email, template_id, status, sent_at, delivered_at, opened_at, bounce_reason, error_message FROM email_logs ORDER BY COALESCE(sent_at, 0) DESC LIMIT 50",
+			)
+			.all<LogRow>()
+	).results ?? [];
+	suppressed = (
+		await db.prepare("SELECT email, reason, added_at FROM suppression_list ORDER BY added_at DESC LIMIT 50").all<SuppressionRow>()
+	).results ?? [];
+
+	const c = await db
+		.prepare(
+			`SELECT
+			   SUM(CASE WHEN email_status='active' THEN 1 ELSE 0 END) AS all_active,
+			   SUM(CASE WHEN email_status='active' AND status='waiting' THEN 1 ELSE 0 END) AS waiting,
+			   SUM(CASE WHEN email_status='active' AND status='invited' THEN 1 ELSE 0 END) AS invited,
+			   SUM(CASE WHEN email_status='active' AND status='redeemed' THEN 1 ELSE 0 END) AS redeemed
+			 FROM waitlist`,
+		)
+		.first<{ all_active: number; waiting: number; invited: number; redeemed: number }>();
+	counts = {
+		all: c?.all_active ?? 0,
+		waiting: c?.waiting ?? 0,
+		invited: c?.invited ?? 0,
+		redeemed: c?.redeemed ?? 0,
+	};
+
+	// Delivery analytics over email_logs. Counts are derived from the event
+	// timestamps the SNS webhook fills in (sent/delivered/opened/clicked) plus
+	// the terminal status for bounces/complaints/failures.
+	const AGG = `
+		COUNT(*) AS total,
+		SUM(CASE WHEN sent_at      IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+		SUM(CASE WHEN delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered,
+		SUM(CASE WHEN opened_at    IS NOT NULL THEN 1 ELSE 0 END) AS opened,
+		SUM(CASE WHEN clicked_at   IS NOT NULL THEN 1 ELSE 0 END) AS clicked,
+		SUM(CASE WHEN status='bounced'    THEN 1 ELSE 0 END) AS bounced,
+		SUM(CASE WHEN status='complained' THEN 1 ELSE 0 END) AS complained,
+		SUM(CASE WHEN status='failed'     THEN 1 ELSE 0 END) AS failed`;
+	stats =
+		(await db.prepare(`SELECT ${AGG} FROM email_logs`).first<Stats>()) ?? stats;
+	templateStats = (
+		await db
+			.prepare(
+				`SELECT template_id, ${AGG} FROM email_logs GROUP BY template_id ORDER BY sent DESC, total DESC`,
+			)
+			.all<TemplateStat & { total: number }>()
+	).results ?? [];
+
+	// Scheduled campaigns: upcoming ones first, then recent completed/failed.
+	campaigns = (
+		await db
+			.prepare(
+				`SELECT id, template_id, audience, scheduled_at, status, total, sent, failed, error_message
+				 FROM email_campaigns
+				 ORDER BY CASE WHEN status = 'scheduled' THEN 0 ELSE 1 END, scheduled_at DESC
+				 LIMIT 20`,
+			)
+			.all<CampaignRow>()
+	).results ?? [];
+} catch (err) {
+	loadError = err instanceof Error ? err.message : String(err);
+	console.error("admin: failed to load email page", err);
+}
+
+const templateName = (id: string | null) =>
+	templates.find((t) => t.id === id)?.name ?? (id ?? "—");
+
+// CureVà serves clients in Utah → all timestamps render in Mountain Time
+// (America/Denver, handles MST/MDT automatically). Workers run in UTC, so
+// without an explicit timeZone these would show UTC.
+const TZ = "America/Denver";
+
+function fmtTs(ms: number | null): string {
+	if (!ms) return "—";
+	const d = new Date(ms);
+	return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: TZ }) + " " +
+		d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: TZ });
+}
+
+/** Full date + time in Mountain Time, e.g. "Jun 15, 2026, 9:00 AM MT". */
+function fmtSchedule(ms: number | null): string {
+	if (!ms) return "—";
+	return new Date(ms).toLocaleString("en-US", {
+		month: "short", day: "numeric", year: "numeric",
+		hour: "numeric", minute: "2-digit", timeZone: TZ,
+	}) + " MT";
+}
+
+const LOG_STATUS_CLASS: Record<string, string> = {
+	queued: "bg-slate-100 text-slate-600",
+	sent: "bg-sky-100 text-sky-700",
+	delivered: "bg-emerald-100 text-emerald-700",
+	bounced: "bg-amber-100 text-amber-800",
+	complained: "bg-rose-100 text-rose-700",
+	failed: "bg-red-100 text-red-700",
+};
+function logClass(s: string): string {
+	return LOG_STATUS_CLASS[s] ?? "bg-slate-100 text-slate-600";
+}
+
+/** Percentage of n over d, e.g. pct(96, 100) → "96%". "—" when d is 0. */
+function pct(n: number, d: number): string {
+	return d > 0 ? Math.round((n / d) * 100) + "%" : "—";
+}
+
+const AUDIENCE_LABEL: Record<string, string> = {
+	all: "All active", waiting: "Waiting", invited: "Invited", redeemed: "Redeemed",
+};
+const CAMPAIGN_STATUS_CLASS: Record<string, string> = {
+	scheduled: "bg-sky-100 text-sky-700",
+	sending: "bg-indigo-100 text-indigo-700",
+	sent: "bg-emerald-100 text-emerald-700",
+	failed: "bg-red-100 text-red-700",
+	canceled: "bg-slate-100 text-slate-500",
+};
+
+// Pass template bodies to the client for live preview (sample-variable
+// substitution) and for the in-page template editor.
+const templatesForClient = templates.map((t) => ({
+	id: t.id,
+	name: t.name,
+	subject: t.subject,
+	html: t.html,
+}));
+---
+
+<!DOCTYPE html>
+<html class="light" lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
+		<meta name="robots" content="noindex, nofollow" />
+		<title>Email · CureVà Admin</title>
+		<script is:inline src="https://cdn.tailwindcss.com?plugins=forms"></script>
+		<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+		<style is:inline>
+			.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; vertical-align: middle; }
+			body { background: #f4f8fb; }
+		</style>
+		<script is:inline id="tailwind-config">
+			tailwind.config = {
+				theme: { extend: {
+					colors: { primary: "#3a656e", "primary-dark": "#2f545c", "primary-container": "#a4d0db" },
+					fontFamily: { sans: ["DM Sans", "sans-serif"] },
+				} },
+			};
+		</script>
+	</head>
+	<body class="font-sans text-slate-800 min-h-screen">
+		<!-- Top bar -->
+		<header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
+			<div class="max-w-[1400px] mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
+				<div class="flex items-center gap-3">
+					<div class="w-9 h-9 rounded-xl bg-primary text-white grid place-items-center font-bold">C</div>
+					<div>
+						<h1 class="text-base font-bold tracking-tight leading-none">CureVà Notify</h1>
+						<p class="text-xs text-slate-500 mt-0.5">Email &amp; notifications</p>
+					</div>
+				</div>
+				<nav class="hidden sm:flex items-center gap-1 rounded-full bg-slate-100 p-1">
+					<a href="/" aria-current="page" class="inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-sm font-semibold text-slate-900 shadow-sm">
+						<span class="material-symbols-outlined text-base">mail</span>Email
+					</a>
+				</nav>
+				<a href="/logout" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition">
+					<span class="material-symbols-outlined text-base">logout</span>Sign out
+				</a>
+			</div>
+		</header>
+
+		<main class="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+			{loadError && (
+				<div class="rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+					<strong>Couldn’t load the email page:</strong> {loadError}
+				</div>
+			)}
+
+			{!sesConfigured && (
+				<div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-4 py-3 text-sm flex items-start gap-2">
+					<span class="material-symbols-outlined text-base mt-0.5">warning</span>
+					<div>
+						<strong>SES not configured.</strong> Sending is disabled until the AWS secrets are set on this Worker:
+						<code class="px-1 rounded bg-amber-100">AWS_REGION</code>,
+						<code class="px-1 rounded bg-amber-100">AWS_ACCESS_KEY_ID</code>,
+						<code class="px-1 rounded bg-amber-100">AWS_SECRET_ACCESS_KEY</code>.
+						You can still preview templates below.
+					</div>
+				</div>
+			)}
+
+			{!loadError && (
+				<div id="cp-container" class="flex flex-col lg:flex-row gap-5 lg:gap-0 items-stretch" style="--left-w: 50%">
+					{/* ---- Compose ---- */}
+					<section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-4 w-full lg:w-[var(--left-w)] lg:shrink-0 min-w-0">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">send</span>Compose &amp; send
+						</h2>
+
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Template</label>
+							<select id="template" onchange="updatePreview()" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20">
+								{templates.map((t) => <option value={t.id}>{t.name}</option>)}
+							</select>
+						</div>
+
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Audience (active subscribers only)</label>
+							<select id="audience" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20">
+								<option value="all">All active — {counts.all}</option>
+								<option value="waiting">Waiting — {counts.waiting}</option>
+								<option value="invited">Invited — {counts.invited}</option>
+								<option value="redeemed">Redeemed — {counts.redeemed}</option>
+							</select>
+						</div>
+
+						<div id="discount-wrap" class="hidden">
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Shared discount code (optional override)</label>
+							<input id="discount" type="text" placeholder="e.g. CUREVA15" oninput="updatePreview()" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+							<p class="text-xs text-slate-400 mt-1">Leave blank to use each subscriber's own code from the waitlist.</p>
+						</div>
+
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">When</label>
+							<div class="grid grid-cols-2 gap-2">
+								<button type="button" id="when-now" onclick="setWhen('now')"
+									class="rounded-xl border px-3 py-2 text-sm font-medium transition border-primary bg-primary/10 text-primary">
+									Send now
+								</button>
+								<button type="button" id="when-later" onclick="setWhen('later')"
+									class="rounded-xl border px-3 py-2 text-sm font-medium transition border-slate-200 text-slate-600 hover:bg-slate-50">
+									Schedule
+								</button>
+							</div>
+						</div>
+
+						<div id="schedule-wrap" class="hidden">
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Date &amp; time · Utah (Mountain Time)</label>
+							<input id="schedule-at" type="datetime-local" oninput="updateScheduleEcho()"
+								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+							<p id="schedule-echo" class="text-xs text-slate-400 mt-1">Sends automatically at this Mountain Time (checked every ~5 min).</p>
+						</div>
+
+						<button id="send-btn" type="button" onclick="submitCampaign()" disabled={!sesConfigured}
+							class="w-full inline-flex items-center justify-center gap-2 rounded-full bg-primary text-white px-4 py-3 text-sm font-semibold hover:bg-primary-dark transition disabled:opacity-50 disabled:cursor-not-allowed">
+							<span class="material-symbols-outlined text-base" id="send-btn-icon">send</span><span id="send-btn-label">Send campaign</span>
+						</button>
+						<div id="send-result" class="hidden rounded-xl px-4 py-3 text-sm"></div>
+					</section>
+
+					{/* ---- Drag-to-resize divider (lg+ only) ---- */}
+					<div id="cp-splitter" title="Drag to resize" class="hidden lg:flex items-center justify-center w-4 shrink-0 cursor-col-resize group select-none touch-none">
+						<div class="h-16 w-1 rounded-full bg-slate-200 group-hover:bg-primary transition-colors"></div>
+					</div>
+
+					{/* ---- Preview ---- */}
+					<section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-3 w-full lg:flex-1 min-w-0">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">visibility</span>Preview
+						</h2>
+						<div class="text-xs text-slate-500">Subject: <span id="preview-subject" class="font-medium text-slate-800"></span></div>
+						<iframe id="preview-frame" title="Email preview" class="w-full h-[600px] rounded-xl border border-slate-200 bg-white"></iframe>
+						<p class="text-xs text-slate-400">Preview uses sample values (<code>name → Ava</code>). Real sends personalize per subscriber.</p>
+					</section>
+				</div>
+			)}
+
+			{/* ---- Scheduled campaigns ---- */}
+			{!loadError && campaigns.length > 0 && (
+				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">schedule</span>Scheduled campaigns
+						</h2>
+						<span class="text-xs text-slate-400">times in Mountain Time (Utah)</span>
+					</div>
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+									<th class="font-semibold px-5 py-3">Template</th>
+									<th class="font-semibold px-5 py-3">Audience</th>
+									<th class="font-semibold px-5 py-3 whitespace-nowrap">When (MT)</th>
+									<th class="font-semibold px-5 py-3">Status</th>
+									<th class="font-semibold px-5 py-3 text-right">Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{campaigns.map((c) => (
+									<tr class="border-b border-slate-50 last:border-0">
+										<td class="px-5 py-3 text-slate-700">{templateName(c.template_id)}</td>
+										<td class="px-5 py-3 text-slate-500">{AUDIENCE_LABEL[c.audience] ?? c.audience}</td>
+										<td class="px-5 py-3 text-slate-500 whitespace-nowrap">{fmtSchedule(c.scheduled_at)}</td>
+										<td class="px-5 py-3">
+											<span class={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${CAMPAIGN_STATUS_CLASS[c.status] ?? "bg-slate-100 text-slate-600"}`}>{c.status}</span>
+											{c.status === "sent" && c.total != null && (
+												<span class="ml-1 text-xs text-slate-400">{c.sent}/{c.total}{c.failed ? ` · ${c.failed} failed` : ""}</span>
+											)}
+											{c.status === "failed" && c.error_message && (
+												<span class="ml-1 text-xs text-red-500" title={c.error_message}>· error</span>
+											)}
+										</td>
+										<td class="px-5 py-3 text-right">
+											{c.status === "scheduled" && (
+												<button type="button" onclick={`cancelCampaign(${JSON.stringify(c.id)})`}
+													class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 h-7 text-xs font-medium text-slate-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition">
+													<span class="material-symbols-outlined text-sm">close</span>Cancel
+												</button>
+											)}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</section>
+			)}
+
+			{/* ---- Templates ---- */}
+			{!loadError && (
+				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">description</span>Templates
+							<span id="tpl-count" class="text-xs font-normal text-slate-400">({templates.length})</span>
+						</h2>
+						<button type="button" onclick="openTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-3.5 py-1.5 text-sm font-semibold hover:bg-primary-dark transition">
+							<span class="material-symbols-outlined text-base">add</span>New template
+						</button>
+					</div>
+					<div id="tpl-list" class="divide-y divide-slate-50">
+						{templates.length === 0 ? (
+							<div class="px-6 py-12 text-center text-slate-400 text-sm">No templates yet. Create one to start sending.</div>
+						) : (
+							templates.map((t) => (
+								<div class="px-5 py-3.5 flex items-center justify-between gap-4">
+									<div class="min-w-0">
+										<p class="text-sm font-medium text-slate-800 truncate">{t.name}</p>
+										<p class="text-xs text-slate-400 truncate">{t.subject}</p>
+									</div>
+									<div class="flex items-center gap-1 shrink-0">
+										<button type="button" onclick={`openTestModal(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Send a test email to yourself"
+											class="inline-flex items-center gap-1 rounded-full border border-slate-200 pl-2 pr-3 h-8 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-200 transition">
+											<span class="material-symbols-outlined text-sm">forward_to_inbox</span>Send test
+										</button>
+										<button type="button" onclick={`openTemplateEditor(${JSON.stringify(t.id)})`} title="Edit"
+											class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+											<span class="material-symbols-outlined text-base">edit</span>
+										</button>
+										<button type="button" onclick={`deleteTemplate(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Delete"
+											class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition">
+											<span class="material-symbols-outlined text-base">delete</span>
+										</button>
+									</div>
+								</div>
+							))
+						)}
+					</div>
+				</section>
+			)}
+
+			{/* ---- Analytics ---- */}
+			{!loadError && (
+				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">monitoring</span>Analytics
+						</h2>
+						<span class="text-xs text-slate-400">all-time</span>
+					</div>
+					{stats.total === 0 ? (
+						<div class="px-6 py-12 text-center text-slate-400 text-sm">
+							No email activity yet. Open &amp; click stats appear here once you send a campaign.
+						</div>
+					) : (
+						<div class="p-5 space-y-5">
+							<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+								<div class="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-slate-400 font-medium">Sent</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.sent}</p>
+								</div>
+								<div class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-emerald-600 font-medium">Delivered</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.delivered}</p>
+									<p class="text-xs text-emerald-700 font-medium">{pct(stats.delivered, stats.sent)} of sent</p>
+								</div>
+								<div class="rounded-xl border border-sky-100 bg-sky-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-sky-600 font-medium">Opened</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.opened}</p>
+									<p class="text-xs text-sky-700 font-medium">{pct(stats.opened, stats.delivered)} of delivered</p>
+								</div>
+								<div class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-indigo-600 font-medium">Clicked</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.clicked}</p>
+									<p class="text-xs text-indigo-700 font-medium">{pct(stats.clicked, stats.delivered)} of delivered</p>
+								</div>
+								<div class="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-amber-600 font-medium">Bounced</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.bounced}</p>
+									<p class="text-xs text-amber-700 font-medium">{pct(stats.bounced, stats.sent)} of sent</p>
+								</div>
+								<div class="rounded-xl border border-rose-100 bg-rose-50/60 px-4 py-3">
+									<p class="text-[11px] uppercase tracking-wide text-rose-600 font-medium">Complaints</p>
+									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.complained}</p>
+									{stats.failed > 0 && <p class="text-xs text-red-600 font-medium">{stats.failed} failed</p>}
+								</div>
+							</div>
+
+							{templateStats.length > 0 && (
+								<div class="overflow-x-auto">
+									<table class="w-full text-sm">
+										<thead>
+											<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+												<th class="font-semibold px-3 py-2">Template</th>
+												<th class="font-semibold px-3 py-2 text-right">Sent</th>
+												<th class="font-semibold px-3 py-2 text-right">Delivered</th>
+												<th class="font-semibold px-3 py-2 text-right">Opened</th>
+												<th class="font-semibold px-3 py-2 text-right">Clicked</th>
+												<th class="font-semibold px-3 py-2 text-right">Bounced</th>
+											</tr>
+										</thead>
+										<tbody>
+											{templateStats.map((t) => (
+												<tr class="border-b border-slate-50 last:border-0">
+													<td class="px-3 py-2 text-slate-700">{templateName(t.template_id)}</td>
+													<td class="px-3 py-2 text-right text-slate-700 tabular-nums">{t.sent}</td>
+													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.delivered} <span class="text-slate-300">({pct(t.delivered, t.sent)})</span></td>
+													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.opened} <span class="text-slate-300">({pct(t.opened, t.delivered)})</span></td>
+													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.clicked} <span class="text-slate-300">({pct(t.clicked, t.delivered)})</span></td>
+													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.bounced}</td>
+												</tr>
+											))}
+										</tbody>
+									</table>
+								</div>
+							)}
+						</div>
+					)}
+				</section>
+			)}
+
+			{/* ---- Recent sends ---- */}
+			{!loadError && (
+				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">history</span>Recent sends
+						</h2>
+						<span class="text-xs text-slate-400">{logs.length} most recent</span>
+					</div>
+					{logs.length === 0 ? (
+						<div class="px-6 py-12 text-center text-slate-400 text-sm">No emails sent yet.</div>
+					) : (
+						<div class="overflow-x-auto">
+							<table class="w-full text-sm">
+								<thead>
+									<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+										<th class="font-semibold px-5 py-3">Recipient</th>
+										<th class="font-semibold px-5 py-3">Template</th>
+										<th class="font-semibold px-5 py-3">Status</th>
+										<th class="font-semibold px-5 py-3 whitespace-nowrap">Sent</th>
+										<th class="font-semibold px-5 py-3 whitespace-nowrap">Delivered</th>
+									</tr>
+								</thead>
+								<tbody>
+									{logs.map((l) => (
+										<tr class="border-b border-slate-50 last:border-0">
+											<td class="px-5 py-3 text-slate-700">{l.email}</td>
+											<td class="px-5 py-3 text-slate-500">{templateName(l.template_id)}</td>
+											<td class="px-5 py-3">
+												<span class={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${logClass(l.status)}`}>{l.status}</span>
+												{l.bounce_reason && <span class="ml-1 text-xs text-amber-600">({l.bounce_reason})</span>}
+												{l.error_message && <span class="ml-1 text-xs text-red-500" title={l.error_message}>· error</span>}
+											</td>
+											<td class="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtTs(l.sent_at)}</td>
+											<td class="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtTs(l.delivered_at)}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					)}
+				</section>
+			)}
+
+			{/* ---- Suppression list ---- */}
+			{!loadError && suppressed.length > 0 && (
+				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+					<div class="px-5 py-4 border-b border-slate-100">
+						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+							<span class="material-symbols-outlined text-primary">block</span>Suppressed addresses
+							<span class="text-xs font-normal text-slate-400">({suppressed.length})</span>
+						</h2>
+					</div>
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<tbody>
+								{suppressed.map((s) => (
+									<tr class="border-b border-slate-50 last:border-0">
+										<td class="px-5 py-2.5 text-slate-700">{s.email}</td>
+										<td class="px-5 py-2.5"><span class="rounded-full bg-slate-100 text-slate-600 px-2.5 py-0.5 text-xs">{s.reason}</span></td>
+										<td class="px-5 py-2.5 text-slate-400 whitespace-nowrap text-right">{fmtTs(s.added_at)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</section>
+			)}
+		</main>
+
+		{/* ---- Template editor modal ---- */}
+		<div id="tpl-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto">
+			<div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl">
+				<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+					<h3 id="tpl-modal-title" class="text-sm font-bold text-slate-900">New template</h3>
+					<button type="button" onclick="closeTemplateEditor()" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+						<span class="material-symbols-outlined text-base">close</span>
+					</button>
+				</div>
+				<div class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+					<div class="space-y-4">
+						<input type="hidden" id="tpl-id" />
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Name</label>
+							<input id="tpl-name" type="text" placeholder="e.g. Spring promo" oninput="updateEditorPreview()"
+								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+						</div>
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Subject</label>
+							<input id="tpl-subject" type="text" placeholder="Subject line" oninput="updateEditorPreview()"
+								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+						</div>
+						<div>
+							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">HTML body</label>
+							<textarea id="tpl-html" rows="14" oninput="updateEditorPreview()" spellcheck="false"
+								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-mono leading-relaxed focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"></textarea>
+							<p class="text-xs text-slate-400 mt-1">
+								Use <code class="px-1 rounded bg-slate-100">{"{{name}}"}</code>,
+								<code class="px-1 rounded bg-slate-100">{"{{discount_code}}"}</code>,
+								<code class="px-1 rounded bg-slate-100">{"{{unsubscribe_url}}"}</code>. Variables are detected automatically.
+							</p>
+						</div>
+						<div id="tpl-error" class="hidden rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200"></div>
+					</div>
+					<div class="space-y-2">
+						<div class="text-xs text-slate-500">Preview subject: <span id="tpl-preview-subject" class="font-medium text-slate-800"></span></div>
+						<iframe id="tpl-preview-frame" title="Template preview" class="w-full h-[420px] rounded-xl border border-slate-200 bg-white"></iframe>
+						<p class="text-xs text-slate-400">Preview uses sample values (<code>name → Ava</code>).</p>
+					</div>
+				</div>
+				<div class="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+					<button type="button" onclick="closeTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+					<button type="button" id="tpl-save-btn" onclick="saveTemplate()" class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-4 py-2 text-sm font-semibold hover:bg-primary-dark transition">
+						<span class="material-symbols-outlined text-base">save</span>Save template
+					</button>
+				</div>
+			</div>
+		</div>
+
+		{/* ---- Send-test modal ---- */}
+		<div id="test-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto">
+			<div class="max-w-md mx-auto mt-10 bg-white rounded-2xl shadow-xl">
+				<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+					<h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+						<span class="material-symbols-outlined text-primary text-base">forward_to_inbox</span>Send test email
+					</h3>
+					<button type="button" onclick="closeTestModal()" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+						<span class="material-symbols-outlined text-base">close</span>
+					</button>
+				</div>
+				<div class="p-5 space-y-4">
+					<p class="text-sm text-slate-500">Template: <span id="test-tpl-name" class="font-medium text-slate-800"></span></p>
+					<input type="hidden" id="test-tpl-id" />
+					<div>
+						<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Send to</label>
+						<input id="test-to" type="email" placeholder="you@example.com" autocomplete="email"
+							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+					</div>
+					<div id="test-discount-wrap" class="hidden">
+						<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Discount code (optional)</label>
+						<input id="test-discount" type="text" placeholder="CUREVA15"
+							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+					</div>
+					{!sesConfigured && (
+						<div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2.5 text-xs flex items-start gap-2">
+							<span class="material-symbols-outlined text-sm mt-0.5">warning</span>
+							<span>SES isn’t configured, so this Worker can’t send yet. Set the <code class="px-1 rounded bg-amber-100">AWS_*</code> secrets first.</span>
+						</div>
+					)}
+					<div id="test-result" class="hidden rounded-xl px-4 py-3 text-sm"></div>
+				</div>
+				<div class="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+					<button type="button" onclick="closeTestModal()" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+					<button type="button" id="test-send-btn" onclick="sendTest()" disabled={!sesConfigured}
+						class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-4 py-2 text-sm font-semibold hover:bg-primary-dark transition disabled:opacity-50 disabled:cursor-not-allowed">
+						<span class="material-symbols-outlined text-base">send</span>Send test email
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<script is:inline define:vars={{ templatesForClient, sesConfigured }}>
+			let TEMPLATES = templatesForClient;
+
+			// Rebuild the template-dependent UI (Compose dropdown, Templates list,
+			// count, Preview) from the in-memory TEMPLATES array — used after an
+			// edit so the right side refreshes live, without a full page reload.
+			function renderTemplates() {
+				// Compose dropdown — keep the current selection if it still exists.
+				const sel = document.getElementById("template");
+				const prev = sel.value;
+				sel.innerHTML = "";
+				for (const t of TEMPLATES) {
+					const opt = document.createElement("option");
+					opt.value = t.id;
+					opt.textContent = t.name;
+					sel.appendChild(opt);
+				}
+				if (TEMPLATES.some((t) => t.id === prev)) sel.value = prev;
+
+				const countEl = document.getElementById("tpl-count");
+				if (countEl) countEl.textContent = `(${TEMPLATES.length})`;
+
+				// Templates list.
+				const list = document.getElementById("tpl-list");
+				list.innerHTML = "";
+				if (TEMPLATES.length === 0) {
+					const empty = document.createElement("div");
+					empty.className = "px-6 py-12 text-center text-slate-400 text-sm";
+					empty.textContent = "No templates yet. Create one to start sending.";
+					list.appendChild(empty);
+				} else {
+					for (const t of TEMPLATES) {
+						const row = document.createElement("div");
+						row.className = "px-5 py-3.5 flex items-center justify-between gap-4";
+
+						const info = document.createElement("div");
+						info.className = "min-w-0";
+						const nm = document.createElement("p");
+						nm.className = "text-sm font-medium text-slate-800 truncate";
+						nm.textContent = t.name;
+						const su = document.createElement("p");
+						su.className = "text-xs text-slate-400 truncate";
+						su.textContent = t.subject;
+						info.append(nm, su);
+
+						const actions = document.createElement("div");
+						actions.className = "flex items-center gap-1 shrink-0";
+						const testBtn = document.createElement("button");
+						testBtn.type = "button";
+						testBtn.title = "Send a test email to yourself";
+						testBtn.className = "inline-flex items-center gap-1 rounded-full border border-slate-200 pl-2 pr-3 h-8 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-200 transition";
+						testBtn.innerHTML = '<span class="material-symbols-outlined text-sm">forward_to_inbox</span>Send test';
+						testBtn.addEventListener("click", () => openTestModal(t.id, t.name));
+						const editBtn = document.createElement("button");
+						editBtn.type = "button";
+						editBtn.title = "Edit";
+						editBtn.className = "inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition";
+						editBtn.innerHTML = '<span class="material-symbols-outlined text-base">edit</span>';
+						editBtn.addEventListener("click", () => openTemplateEditor(t.id));
+						const delBtn = document.createElement("button");
+						delBtn.type = "button";
+						delBtn.title = "Delete";
+						delBtn.className = "inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition";
+						delBtn.innerHTML = '<span class="material-symbols-outlined text-base">delete</span>';
+						delBtn.addEventListener("click", () => deleteTemplate(t.id, t.name));
+						actions.append(testBtn, editBtn, delBtn);
+
+						row.append(info, actions);
+						list.appendChild(row);
+					}
+				}
+
+				// Disable sending when there's nothing to send.
+				const sendBtn = document.getElementById("send-btn");
+				if (sendBtn) sendBtn.disabled = !sesConfigured || TEMPLATES.length === 0;
+
+				updatePreview();
+			}
+
+			function fillSample(str, discount) {
+				return String(str)
+					.replace(/\{\{\s*name\s*\}\}/g, "Ava")
+					.replace(/\{\{\s*discount_code\s*\}\}/g, discount || "CUREVA15")
+					.replace(/\{\{\s*unsubscribe_url\s*\}\}/g, "#")
+					.replace(/\{\{\s*email\s*\}\}/g, "ava@example.com");
+			}
+
+			function updatePreview() {
+				const id = document.getElementById("template").value;
+				const tpl = TEMPLATES.find((t) => t.id === id);
+				const discount = (document.getElementById("discount") || {}).value || "";
+				const subjEl = document.getElementById("preview-subject");
+				const frame = document.getElementById("preview-frame");
+				if (!tpl) return;
+				if (subjEl) subjEl.textContent = fillSample(tpl.subject, discount);
+				if (frame) frame.srcdoc = fillSample(tpl.html, discount);
+				// Show the discount field only for templates that use it.
+				const wrap = document.getElementById("discount-wrap");
+				if (wrap) wrap.classList.toggle("hidden", !/\{\{\s*discount_code\s*\}\}/.test(tpl.html + tpl.subject));
+			}
+
+			async function sendCampaign() {
+				if (!sesConfigured) return;
+				const btn = document.getElementById("send-btn");
+				const result = document.getElementById("send-result");
+				const templateId = document.getElementById("template").value;
+				const audience = document.getElementById("audience").value;
+				const audienceLabel = document.getElementById("audience").selectedOptions[0].textContent;
+				const discount = (document.getElementById("discount") || {}).value || "";
+
+				if (!confirm(`Send "${document.getElementById("template").selectedOptions[0].textContent}" to: ${audienceLabel}?`)) return;
+
+				btn.disabled = true;
+				const original = btn.innerHTML;
+				btn.innerHTML = "Sending…";
+				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+
+				try {
+					const body = { template_id: templateId, audience };
+					if (discount) body.variables = { discount_code: discount };
+					const res = await fetch("/api/email/send", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) {
+						result.className = "rounded-xl px-4 py-3 text-sm bg-emerald-50 text-emerald-800 border border-emerald-200";
+						result.textContent = `Sent ${data.sent} of ${data.total}. ${data.failed ? data.failed + " failed/suppressed." : ""}`;
+					} else {
+						result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+						result.textContent = data.error || "Send failed.";
+					}
+				} catch (e) {
+					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.textContent = "Network error. Please try again.";
+				} finally {
+					btn.disabled = false;
+					btn.innerHTML = original;
+				}
+			}
+
+			// ---- Template editor ----
+			function openTemplateEditor(id) {
+				const tpl = id ? TEMPLATES.find((t) => t.id === id) : null;
+				document.getElementById("tpl-modal-title").textContent = tpl ? "Edit template" : "New template";
+				document.getElementById("tpl-id").value = tpl ? tpl.id : "";
+				document.getElementById("tpl-name").value = tpl ? tpl.name : "";
+				document.getElementById("tpl-subject").value = tpl ? tpl.subject : "";
+				document.getElementById("tpl-html").value = tpl ? tpl.html : "";
+				const err = document.getElementById("tpl-error");
+				err.classList.add("hidden");
+				document.getElementById("tpl-modal").classList.remove("hidden");
+				updateEditorPreview();
+			}
+
+			function closeTemplateEditor() {
+				document.getElementById("tpl-modal").classList.add("hidden");
+			}
+
+			function updateEditorPreview() {
+				const subject = document.getElementById("tpl-subject").value;
+				const html = document.getElementById("tpl-html").value;
+				document.getElementById("tpl-preview-subject").textContent = fillSample(subject, "");
+				document.getElementById("tpl-preview-frame").srcdoc = fillSample(html, "");
+			}
+
+			async function saveTemplate() {
+				const id = document.getElementById("tpl-id").value;
+				const name = document.getElementById("tpl-name").value.trim();
+				const subject = document.getElementById("tpl-subject").value.trim();
+				const html = document.getElementById("tpl-html").value;
+				const err = document.getElementById("tpl-error");
+				const btn = document.getElementById("tpl-save-btn");
+				if (!name || !subject || !html.trim()) {
+					err.textContent = "Name, subject and HTML body are all required.";
+					err.classList.remove("hidden");
+					return;
+				}
+				const body = { action: id ? "update" : "create", name, subject, html };
+				if (id) body.id = id;
+				btn.disabled = true;
+				const original = btn.innerHTML;
+				btn.innerHTML = "Saving…";
+				try {
+					const res = await fetch("/api/email/templates", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) {
+						if (Array.isArray(data.templates)) TEMPLATES = data.templates;
+						// Keep showing the just-saved template in Compose & preview.
+						const sel = document.getElementById("template");
+						if (data.id) sel.dataset.pending = data.id;
+						renderTemplates();
+						if (sel.dataset.pending && TEMPLATES.some((t) => t.id === sel.dataset.pending)) {
+							sel.value = sel.dataset.pending;
+							updatePreview();
+						}
+						delete sel.dataset.pending;
+						closeTemplateEditor();
+						btn.disabled = false;
+						btn.innerHTML = original;
+						return;
+					}
+					err.textContent = data.error || "Save failed.";
+					err.classList.remove("hidden");
+				} catch (e) {
+					err.textContent = "Network error. Please try again.";
+					err.classList.remove("hidden");
+				}
+				btn.disabled = false;
+				btn.innerHTML = original;
+			}
+
+			async function deleteTemplate(id, name) {
+				if (!confirm(`Delete template "${name}"? This cannot be undone.`)) return;
+				try {
+					const res = await fetch("/api/email/templates", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ action: "delete", id }),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) {
+						if (Array.isArray(data.templates)) TEMPLATES = data.templates;
+						renderTemplates();
+						return;
+					}
+					alert(data.error || "Delete failed.");
+				} catch (e) {
+					alert("Network error. Please try again.");
+				}
+			}
+
+			// ---- Send test email ----
+			function openTestModal(id, name) {
+				const tpl = TEMPLATES.find((t) => t.id === id);
+				document.getElementById("test-tpl-id").value = id;
+				document.getElementById("test-tpl-name").textContent = name;
+				document.getElementById("test-to").value = "";
+				const result = document.getElementById("test-result");
+				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+				// Show the discount field only for templates that use {{discount_code}}.
+				const usesDiscount = tpl && /\{\{\s*discount_code\s*\}\}/.test(tpl.html + tpl.subject);
+				document.getElementById("test-discount-wrap").classList.toggle("hidden", !usesDiscount);
+				document.getElementById("test-modal").classList.remove("hidden");
+				document.getElementById("test-to").focus();
+			}
+
+			function closeTestModal() {
+				document.getElementById("test-modal").classList.add("hidden");
+			}
+
+			async function sendTest() {
+				if (!sesConfigured) return;
+				const id = document.getElementById("test-tpl-id").value;
+				const to = document.getElementById("test-to").value.trim();
+				const discount = (document.getElementById("test-discount") || {}).value || "";
+				const result = document.getElementById("test-result");
+				const btn = document.getElementById("test-send-btn");
+				if (!to) {
+					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.textContent = "Enter an email address.";
+					return;
+				}
+				const body = { template_id: id, to };
+				if (discount) body.discount_code = discount;
+				btn.disabled = true;
+				const original = btn.innerHTML;
+				btn.innerHTML = "Sending…";
+				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+				try {
+					const res = await fetch("/api/email/test", {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) {
+						result.className = "rounded-xl px-4 py-3 text-sm bg-emerald-50 text-emerald-800 border border-emerald-200";
+						result.textContent = `Test sent to ${data.to}. Check the inbox (and spam).`;
+					} else {
+						result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+						result.textContent = data.error || "Send failed.";
+					}
+				} catch (e) {
+					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.textContent = "Network error. Please try again.";
+				}
+				btn.disabled = false;
+				btn.innerHTML = original;
+			}
+
+			// ---- Schedule campaign (Utah / Mountain Time) ----
+			let _when = "now";
+
+			function setWhen(mode) {
+				_when = mode;
+				const active = "rounded-xl border px-3 py-2 text-sm font-medium transition border-primary bg-primary/10 text-primary";
+				const idle = "rounded-xl border px-3 py-2 text-sm font-medium transition border-slate-200 text-slate-600 hover:bg-slate-50";
+				document.getElementById("when-now").className = mode === "now" ? active : idle;
+				document.getElementById("when-later").className = mode === "later" ? active : idle;
+				document.getElementById("schedule-wrap").classList.toggle("hidden", mode !== "later");
+				document.getElementById("send-btn-label").textContent = mode === "later" ? "Schedule campaign" : "Send campaign";
+				document.getElementById("send-btn-icon").textContent = mode === "later" ? "schedule" : "send";
+			}
+
+			// Interpret a datetime-local string ("YYYY-MM-DDTHH:mm") as a wall-clock
+			// time in America/Denver (Utah) and return the absolute epoch ms — so the
+			// scheduled time means Utah time no matter where the admin's browser is.
+			function denverEpochFromWall(localStr) {
+				if (!localStr || localStr.indexOf("T") === -1) return NaN;
+				const [datePart, timePart] = localStr.split("T");
+				const [Y, M, D] = datePart.split("-").map(Number);
+				const [h, m] = timePart.split(":").map(Number);
+				const guess = Date.UTC(Y, M - 1, D, h, m);
+				const fmt = new Intl.DateTimeFormat("en-US", {
+					timeZone: "America/Denver", year: "numeric", month: "2-digit", day: "2-digit",
+					hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+				});
+				const p = {};
+				for (const part of fmt.formatToParts(new Date(guess))) p[part.type] = part.value;
+				const wallAsUTC = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+				const offset = wallAsUTC - guess; // Denver = UTC + offset
+				return guess - offset;
+			}
+
+			function updateScheduleEcho() {
+				const v = document.getElementById("schedule-at").value;
+				const echo = document.getElementById("schedule-echo");
+				const epoch = denverEpochFromWall(v);
+				if (!v || isNaN(epoch)) {
+					echo.className = "text-xs text-slate-400 mt-1";
+					echo.textContent = "Sends automatically at this Mountain Time (checked every ~5 min).";
+					return;
+				}
+				const when = new Date(epoch).toLocaleString("en-US", {
+					month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+					timeZone: "America/Denver",
+				});
+				if (epoch <= Date.now()) {
+					echo.className = "text-xs text-red-500 mt-1";
+					echo.textContent = "That time is in the past — pick a future time.";
+				} else {
+					echo.className = "text-xs text-slate-500 mt-1";
+					echo.textContent = "Sends " + when + " MT — automatically (checked every ~5 min).";
+				}
+			}
+
+			function showSendResult(ok, msg) {
+				const result = document.getElementById("send-result");
+				result.className = "rounded-xl px-4 py-3 text-sm " +
+					(ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+						: "bg-red-50 text-red-800 border border-red-200");
+				result.textContent = msg;
+			}
+
+			function submitCampaign() {
+				if (!sesConfigured) return;
+				if (_when === "later") scheduleCampaign();
+				else sendCampaign();
+			}
+
+			async function scheduleCampaign() {
+				const templateId = document.getElementById("template").value;
+				const audience = document.getElementById("audience").value;
+				const discount = (document.getElementById("discount") || {}).value || "";
+				const v = document.getElementById("schedule-at").value;
+				const epoch = denverEpochFromWall(v);
+				if (!v || isNaN(epoch)) { showSendResult(false, "Pick a date and time."); return; }
+				if (epoch <= Date.now()) { showSendResult(false, "Pick a time in the future (Mountain Time)."); return; }
+				const body = { action: "create", template_id: templateId, audience, scheduled_at: epoch };
+				if (discount) body.variables = { discount_code: discount };
+				const btn = document.getElementById("send-btn");
+				const label = document.getElementById("send-btn-label");
+				const prevLabel = label.textContent;
+				btn.disabled = true;
+				label.textContent = "Scheduling…";
+				try {
+					const res = await fetch("/api/email/schedule", {
+						method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) { location.reload(); return; }
+					showSendResult(false, data.error || "Could not schedule.");
+				} catch (e) {
+					showSendResult(false, "Network error. Please try again.");
+				}
+				btn.disabled = false;
+				label.textContent = prevLabel;
+			}
+
+			async function cancelCampaign(id) {
+				if (!confirm("Cancel this scheduled campaign?")) return;
+				try {
+					const res = await fetch("/api/email/schedule", {
+						method: "POST", headers: { "content-type": "application/json" },
+						body: JSON.stringify({ action: "cancel", id }),
+					});
+					const data = await res.json();
+					if (res.ok && data.ok) { location.reload(); return; }
+					alert(data.error || "Could not cancel.");
+				} catch (e) {
+					alert("Network error. Please try again.");
+				}
+			}
+
+			// Astro wraps an `is:inline` + `define:vars` script in an IIFE, so these
+			// functions are NOT global by default — but the inline onclick/onchange/
+			// oninput attributes in the markup resolve against `window`. Expose them.
+			Object.assign(window, {
+				updatePreview,
+				sendCampaign,
+				openTemplateEditor,
+				closeTemplateEditor,
+				updateEditorPreview,
+				saveTemplate,
+				deleteTemplate,
+				openTestModal,
+				closeTestModal,
+				sendTest,
+				setWhen,
+				submitCampaign,
+				scheduleCampaign,
+				cancelCampaign,
+				updateScheduleEcho,
+			});
+
+			// ---- Drag-to-resize divider between Compose and Preview ----
+			(function setupSplitter() {
+				const container = document.getElementById("cp-container");
+				const splitter = document.getElementById("cp-splitter");
+				const frame = document.getElementById("preview-frame");
+				if (!container || !splitter) return;
+				let dragging = false;
+
+				splitter.addEventListener("pointerdown", (e) => {
+					dragging = true;
+					splitter.setPointerCapture(e.pointerId);
+					document.body.style.userSelect = "none";
+					if (frame) frame.style.pointerEvents = "none"; // don't let the iframe swallow moves
+					e.preventDefault();
+				});
+				splitter.addEventListener("pointermove", (e) => {
+					if (!dragging) return;
+					const rect = container.getBoundingClientRect();
+					let pct = ((e.clientX - rect.left) / rect.width) * 100;
+					pct = Math.max(25, Math.min(75, pct));
+					container.style.setProperty("--left-w", pct + "%");
+				});
+				const end = () => {
+					if (!dragging) return;
+					dragging = false;
+					document.body.style.userSelect = "";
+					if (frame) frame.style.pointerEvents = "";
+				};
+				splitter.addEventListener("pointerup", end);
+				splitter.addEventListener("pointercancel", end);
+				// Double-click the handle to reset to a 50/50 split.
+				splitter.addEventListener("dblclick", () => container.style.setProperty("--left-w", "50%"));
+			})();
+
+			updatePreview();
+		</script>
+	</body>
+</html>

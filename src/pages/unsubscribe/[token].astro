@@ -1,0 +1,108 @@
+---
+import { env } from "cloudflare:workers";
+import { ensureEmailSchema } from "../../utils/email-db";
+import { addSuppression } from "../../utils/email/suppression";
+
+// Public, token-gated, no auth. Server-rendered.
+export const prerender = false;
+
+const db = env.DB as D1Database;
+const token = Astro.params.token ?? "";
+
+await ensureEmailSchema(db);
+
+const subscriber = await db
+	.prepare("SELECT id, email, email_status FROM waitlist WHERE unsubscribe_token = ?")
+	.bind(token)
+	.first<{ id: string; email: string; email_status: string }>();
+
+let state: "invalid" | "confirm" | "done" | "already" = subscriber
+	? subscriber.email_status === "unsubscribed"
+		? "already"
+		: "confirm"
+	: "invalid";
+
+// POST confirms the opt-out.
+if (Astro.request.method === "POST" && subscriber && state === "confirm") {
+	await db
+		.prepare("UPDATE waitlist SET email_status = 'unsubscribed' WHERE id = ?")
+		.bind(subscriber.id)
+		.run();
+	await addSuppression(db, subscriber.email, "unsubscribe");
+	state = "done";
+}
+
+const maskedEmail = subscriber?.email ?? "";
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
+		<meta name="robots" content="noindex, nofollow" />
+		<title>Unsubscribe · CureVà</title>
+		<link
+			href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			:root { --primary: #3a656e; --bg: #f0fbff; --surface: #ffffff; --text: #0d1e22; --muted: #41484a; }
+			* { box-sizing: border-box; }
+			body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg);
+				font-family: "DM Sans", system-ui, sans-serif; color: var(--text); padding: 24px; }
+			.card { background: var(--surface); max-width: 480px; width: 100%; border-radius: 24px;
+				padding: 40px; box-shadow: 0 20px 50px rgba(58,101,110,0.15); text-align: center; }
+			h1 { color: var(--primary); font-size: 24px; margin: 0 0 12px; }
+			p { color: var(--muted); font-size: 15px; line-height: 1.6; margin: 0 0 8px; }
+			.email { font-weight: 600; color: var(--text); }
+			button { margin-top: 24px; width: 100%; border: none; cursor: pointer; border-radius: 999px;
+				background: var(--primary); color: #fff; font: inherit; font-weight: 600; padding: 14px 20px;
+				transition: opacity .2s; }
+			button:hover { opacity: .92; }
+			.muted-btn { margin-top: 12px; background: transparent; color: var(--muted); }
+			.icon { font-size: 40px; }
+		</style>
+	</head>
+	<body>
+		<main class="card">
+			{state === "invalid" && (
+				<>
+					<div class="icon">🔗</div>
+					<h1>Link not recognized</h1>
+					<p>This unsubscribe link is invalid or has expired. If you keep receiving emails, reply to one and we'll remove you.</p>
+				</>
+			)}
+
+			{state === "already" && (
+				<>
+					<div class="icon">✓</div>
+					<h1>You're unsubscribed</h1>
+					<p><span class="email">{maskedEmail}</span> is already off the CureVà list. No further emails will be sent.</p>
+				</>
+			)}
+
+			{state === "confirm" && (
+				<>
+					<div class="icon">✉️</div>
+					<h1>Unsubscribe?</h1>
+					<p>Stop receiving CureVà waitlist emails at <span class="email">{maskedEmail}</span>?</p>
+					<form method="POST">
+						<button type="submit">Yes, unsubscribe me</button>
+					</form>
+					<form method="GET" action="https://curevanails-tech.workers.dev/">
+						<button type="submit" class="muted-btn">Keep me subscribed</button>
+					</form>
+				</>
+			)}
+
+			{state === "done" && (
+				<>
+					<div class="icon">👋</div>
+					<h1>You're unsubscribed</h1>
+					<p><span class="email">{maskedEmail}</span> has been removed from the CureVà list. We're sorry to see you go.</p>
+				</>
+			)}
+		</main>
+	</body>
+</html>
