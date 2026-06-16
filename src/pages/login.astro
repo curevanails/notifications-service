@@ -55,104 +55,200 @@ if (Astro.request.method === "POST") {
 ---
 
 <!DOCTYPE html>
-<html class="light" lang="en">
+<html lang="en">
 	<head>
 		<meta charset="utf-8" />
 		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
 		<meta name="robots" content="noindex, nofollow" />
-		<title>Sign in | CureVà Admin</title>
-		<script is:inline src="https://cdn.tailwindcss.com"></script>
-		<link
-			href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap"
-			rel="stylesheet"
-		/>
-		<link
-			href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-			rel="stylesheet"
-		/>
+		<title>Sign in · CureVà Notify</title>
+		<script is:inline>
+			// Apply theme before render to avoid a flash. TailAdmin pattern.
+			(function () {
+				try {
+					const saved = localStorage.getItem("theme");
+					const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+					if (saved === "dark" || (!saved && sysDark)) document.documentElement.classList.add("dark");
+				} catch (_) {}
+			})();
+		</script>
+		<script is:inline src="https://cdn.tailwindcss.com?plugins=forms"></script>
+		<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+		<script is:inline id="tailwind-config">
+			tailwind.config = {
+				darkMode: "class",
+				theme: {
+					extend: {
+						colors: {
+							brand: {
+								25: "#F2F7FF", 50: "#ECF3FF", 100: "#DDE9FF", 200: "#C2D6FF",
+								300: "#9CB9FF", 400: "#7592FF", 500: "#465FFF", 600: "#3641F5",
+								700: "#2A31D8", 800: "#252DAE", 900: "#262E89", 950: "#161950",
+							},
+							curva: { DEFAULT: "#3a656e", dark: "#2f545c", light: "#7fa8b1" },
+							gray: {
+								25: "#FCFCFD", 50: "#F9FAFB", 100: "#F2F4F7", 200: "#E4E7EC",
+								300: "#D0D5DD", 400: "#98A2B3", 500: "#667085", 600: "#475467",
+								700: "#344054", 800: "#1D2939", 900: "#101828", 950: "#0C111D",
+							},
+						},
+						fontFamily: { sans: ["Outfit", "sans-serif"] },
+						boxShadow: {
+							"theme-xs": "0px 1px 2px 0px rgba(16, 24, 40, 0.05)",
+							"theme-sm": "0px 1px 3px 0px rgba(16, 24, 40, 0.10), 0px 1px 2px 0px rgba(16, 24, 40, 0.06)",
+						},
+					},
+				},
+			};
+		</script>
 		<style is:inline>
 			.material-symbols-outlined {
 				font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 				vertical-align: middle;
 			}
-			input:focus {
-				box-shadow: 0 0 0 2px rgba(164, 208, 219, 0.4) !important;
-				border-color: #3a656e !important;
+			@keyframes card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+			.card-in { animation: card-in .25s ease-out both; }
+			/* Grid backdrop used on the brand panel. */
+			.brand-grid {
+				background-image:
+					linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px),
+					linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px);
+				background-size: 32px 32px;
 			}
 		</style>
-		<script is:inline id="tailwind-config">
-			tailwind.config = {
-				theme: {
-					extend: {
-						colors: {
-							primary: "#3a656e",
-							"primary-container": "#a4d0db",
-							background: "#f0fbff",
-							"surface-container": "#dff1f7",
-							"on-surface": "#0d1e22",
-							"on-surface-variant": "#41484a",
-							"on-primary": "#ffffff",
-							"outline-variant": "#c0c8ca",
-						},
-						fontFamily: { sans: ["DM Sans", "sans-serif"] },
-					},
-				},
-			};
-		</script>
 	</head>
-	<body class="bg-background text-on-surface font-sans min-h-screen flex items-center justify-center px-4">
-		<main class="w-full max-w-sm">
-			<div class="bg-white rounded-2xl shadow-[0_20px_40px_0_rgba(164,208,219,0.25)] border border-outline-variant/60 overflow-hidden">
-				<div class="bg-primary text-on-primary px-8 py-7 text-center">
-					<div class="w-12 h-12 rounded-full bg-on-primary/15 flex items-center justify-center mx-auto mb-3">
-						<span class="material-symbols-outlined text-2xl">lock</span>
-					</div>
-					<h1 class="text-xl font-bold tracking-tight">CureVà Admin</h1>
-					<p class="text-sm opacity-80">Email dashboard sign-in</p>
+	<body class="font-sans antialiased bg-white text-gray-700 dark:bg-gray-900 dark:text-gray-300">
+		<div class="relative min-h-screen flex flex-col lg:flex-row">
+			<!-- Form side -->
+			<div class="flex w-full lg:w-1/2 flex-col min-h-screen">
+				<div class="flex items-center justify-between px-6 sm:px-10 h-16">
+					<a href="/" class="flex items-center gap-3">
+						<div class="w-9 h-9 rounded-xl bg-curva text-white grid place-items-center font-bold text-sm shadow-theme-sm">C</div>
+						<span class="text-sm font-semibold text-gray-800 dark:text-white/90">CureVà Notify</span>
+					</a>
+					<button type="button" onclick="toggleTheme()" title="Toggle theme"
+						class="grid h-10 w-10 place-items-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.05] transition">
+						<span class="material-symbols-outlined text-xl dark:hidden">dark_mode</span>
+						<span class="material-symbols-outlined text-xl hidden dark:inline">light_mode</span>
+					</button>
 				</div>
 
-				<form method="POST" class="px-8 py-7 space-y-5" novalidate>
-					{error && (
-						<div class="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 text-red-800 px-3 py-2.5 text-sm">
-							<span class="material-symbols-outlined text-base">error</span>
-							Incorrect username or password.
+				<div class="flex-1 flex items-center justify-center px-6 sm:px-10 py-8">
+					<main class="w-full max-w-md card-in">
+						<div class="mb-8">
+							<h1 class="text-title-sm sm:text-title-md text-3xl font-semibold text-gray-800 dark:text-white/90">Sign in</h1>
+							<p class="text-sm text-gray-500 dark:text-gray-400 mt-2">Welcome back — enter your credentials to access the email dashboard.</p>
 						</div>
-					)}
 
-					<label class="block">
-						<span class="text-xs uppercase tracking-wider text-on-surface-variant font-medium">Username</span>
-						<input
-							name="username"
-							type="text"
-							autocomplete="username"
-							value="admin"
-							required
-							class="mt-1.5 w-full rounded-lg border border-outline-variant bg-background px-3.5 py-2.5 text-sm outline-none transition"
-						/>
-					</label>
+						<form method="POST" class="space-y-5" novalidate>
+							{error && (
+								<div class="flex items-start gap-2.5 rounded-lg bg-error-50 border border-error-200 text-error-700 px-4 py-3 text-sm dark:bg-error-500/10 dark:border-error-500/20 dark:text-error-400" style="background-color: rgb(254 242 242); border-color: rgb(254 202 202); color: rgb(185 28 28);">
+									<span class="material-symbols-outlined text-base">error</span>
+									<span>Incorrect username or password.</span>
+								</div>
+							)}
 
-					<label class="block">
-						<span class="text-xs uppercase tracking-wider text-on-surface-variant font-medium">Password</span>
-						<input
-							name="password"
-							type="password"
-							autocomplete="current-password"
-							required
-							autofocus
-							class="mt-1.5 w-full rounded-lg border border-outline-variant bg-background px-3.5 py-2.5 text-sm outline-none transition"
-						/>
-					</label>
+							<div>
+								<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+									Username<span class="text-brand-500">*</span>
+								</label>
+								<input
+									name="username"
+									type="text"
+									autocomplete="username"
+									value="admin"
+									required
+									class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
+								/>
+							</div>
 
-					<button
-						type="submit"
-						class="w-full rounded-full bg-primary text-on-primary py-3 text-sm font-semibold hover:opacity-90 active:scale-[0.99] transition flex items-center justify-center gap-2"
-					>
-						<span class="material-symbols-outlined text-base">login</span>
-						Sign in
-					</button>
-				</form>
+							<div>
+								<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+									Password<span class="text-brand-500">*</span>
+								</label>
+								<div class="relative">
+									<input
+										id="password"
+										name="password"
+										type="password"
+										autocomplete="current-password"
+										required
+										autofocus
+										placeholder="Enter your password"
+										class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 pr-12 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
+									/>
+									<button type="button" onclick="togglePw()" tabindex="-1"
+										class="absolute right-3 top-1/2 -translate-y-1/2 grid h-8 w-8 place-items-center rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition">
+										<span id="pw-eye" class="material-symbols-outlined text-lg">visibility</span>
+									</button>
+								</div>
+							</div>
+
+							<div class="flex items-center justify-between text-sm">
+								<label class="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 cursor-pointer">
+									<input type="checkbox" class="form-checkbox h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-900" />
+									Keep me signed in
+								</label>
+								<span class="text-gray-400 dark:text-gray-500">Staff only</span>
+							</div>
+
+							<button
+								type="submit"
+								class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition"
+							>
+								Sign in
+								<span class="material-symbols-outlined text-base">arrow_forward</span>
+							</button>
+						</form>
+
+						<p class="text-xs text-gray-400 dark:text-gray-500 mt-8 text-center">CureVà Beauty Lounge · Notifications service · Utah (Mountain Time)</p>
+					</main>
+				</div>
 			</div>
-			<p class="text-center text-xs text-on-surface-variant/70 mt-5">CureVà Beauty Lounge · Staff only</p>
-		</main>
+
+			<!-- Brand panel -->
+			<div class="hidden lg:flex lg:w-1/2 relative items-center justify-center bg-brand-950 overflow-hidden" aria-hidden="true">
+				<div class="absolute inset-0 brand-grid opacity-40"></div>
+				<div class="absolute inset-0" style="background: radial-gradient(700px 420px at 70% 20%, rgba(127,168,177,.30), transparent 60%), radial-gradient(600px 420px at 20% 90%, rgba(70,95,255,.35), transparent 60%);"></div>
+				<div class="relative px-12 text-center max-w-md">
+					<div class="w-16 h-16 rounded-2xl bg-curva text-white grid place-items-center font-bold text-3xl mb-8 mx-auto shadow-2xl">C</div>
+					<h2 class="text-2xl font-semibold text-white leading-snug">Campaigns, templates &amp; delivery insights for CureVà.</h2>
+					<p class="text-sm text-white/60 mt-4">Send to the waitlist, schedule in Mountain Time, and track every open and click.</p>
+					<div class="mt-10 grid grid-cols-3 gap-3">
+						<div class="rounded-xl bg-white/5 border border-white/10 px-4 py-4 text-left backdrop-blur-sm">
+							<span class="material-symbols-outlined text-brand-300">send</span>
+							<p class="text-[11px] font-semibold uppercase tracking-wider text-white/50 mt-2">Send</p>
+						</div>
+						<div class="rounded-xl bg-white/5 border border-white/10 px-4 py-4 text-left backdrop-blur-sm">
+							<span class="material-symbols-outlined text-brand-300">event</span>
+							<p class="text-[11px] font-semibold uppercase tracking-wider text-white/50 mt-2">Schedule</p>
+						</div>
+						<div class="rounded-xl bg-white/5 border border-white/10 px-4 py-4 text-left backdrop-blur-sm">
+							<span class="material-symbols-outlined text-brand-300">monitoring</span>
+							<p class="text-[11px] font-semibold uppercase tracking-wider text-white/50 mt-2">Track</p>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<script is:inline>
+			function toggleTheme() {
+				const root = document.documentElement;
+				const isDark = root.classList.toggle("dark");
+				try { localStorage.setItem("theme", isDark ? "dark" : "light"); } catch (_) {}
+			}
+			function togglePw() {
+				const input = document.getElementById("password");
+				const eye = document.getElementById("pw-eye");
+				if (input.type === "password") {
+					input.type = "text";
+					eye.textContent = "visibility_off";
+				} else {
+					input.type = "password";
+					eye.textContent = "visibility";
+				}
+			}
+		</script>
 	</body>
 </html>

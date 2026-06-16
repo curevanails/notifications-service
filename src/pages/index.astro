@@ -169,17 +169,19 @@ function fmtSchedule(ms: number | null): string {
 	}) + " MT";
 }
 
+// TailAdmin-style status badges: soft tinted bg with dark mode variants.
 const LOG_STATUS_CLASS: Record<string, string> = {
-	queued: "bg-slate-100 text-slate-600",
-	sent: "bg-sky-100 text-sky-700",
-	delivered: "bg-emerald-100 text-emerald-700",
-	bounced: "bg-amber-100 text-amber-800",
-	complained: "bg-rose-100 text-rose-700",
-	failed: "bg-red-100 text-red-700",
+	queued: "bg-gray-100 text-gray-700 dark:bg-white/[0.03] dark:text-gray-400",
+	sent: "bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/15 dark:text-blue-light-400",
+	delivered: "bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500",
+	bounced: "bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-orange-400",
+	complained: "bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-400",
+	failed: "bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-500",
 };
 function logClass(s: string): string {
-	return LOG_STATUS_CLASS[s] ?? "bg-slate-100 text-slate-600";
+	return LOG_STATUS_CLASS[s] ?? "bg-gray-100 text-gray-700 dark:bg-white/[0.03] dark:text-gray-400";
 }
+const PILL = "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium";
 
 /** Percentage of n over d, e.g. pct(96, 100) → "96%". "—" when d is 0. */
 function pct(n: number, d: number): string {
@@ -190,11 +192,11 @@ const AUDIENCE_LABEL: Record<string, string> = {
 	all: "All active", waiting: "Waiting", invited: "Invited", redeemed: "Redeemed",
 };
 const CAMPAIGN_STATUS_CLASS: Record<string, string> = {
-	scheduled: "bg-sky-100 text-sky-700",
-	sending: "bg-indigo-100 text-indigo-700",
-	sent: "bg-emerald-100 text-emerald-700",
-	failed: "bg-red-100 text-red-700",
-	canceled: "bg-slate-100 text-slate-500",
+	scheduled: "bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/15 dark:text-blue-light-400",
+	sending: "bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400",
+	sent: "bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500",
+	failed: "bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-500",
+	canceled: "bg-gray-100 text-gray-600 dark:bg-white/[0.03] dark:text-gray-400",
 };
 
 // Pass template bodies to the client for live preview (sample-variable
@@ -208,433 +210,708 @@ const templatesForClient = templates.map((t) => ({
 ---
 
 <!DOCTYPE html>
-<html class="light" lang="en">
+<html lang="en">
 	<head>
 		<meta charset="utf-8" />
 		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
 		<meta name="robots" content="noindex, nofollow" />
-		<title>Email · CureVà Admin</title>
+		<title>Email · CureVà Notify</title>
+		<script is:inline>
+			// Apply theme before render to avoid a flash. TailAdmin pattern.
+			(function () {
+				try {
+					const saved = localStorage.getItem("theme");
+					const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+					if (saved === "dark" || (!saved && sysDark)) document.documentElement.classList.add("dark");
+				} catch (_) {}
+			})();
+		</script>
 		<script is:inline src="https://cdn.tailwindcss.com?plugins=forms"></script>
-		<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
 		<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
-		<style is:inline>
-			.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; vertical-align: middle; }
-			body { background: #f4f8fb; }
-		</style>
 		<script is:inline id="tailwind-config">
 			tailwind.config = {
-				theme: { extend: {
-					colors: { primary: "#3a656e", "primary-dark": "#2f545c", "primary-container": "#a4d0db" },
-					fontFamily: { sans: ["DM Sans", "sans-serif"] },
-				} },
+				darkMode: "class",
+				theme: {
+					extend: {
+						colors: {
+							brand: {
+								25: "#F2F7FF", 50: "#ECF3FF", 100: "#DDE9FF", 200: "#C2D6FF",
+								300: "#9CB9FF", 400: "#7592FF", 500: "#465FFF", 600: "#3641F5",
+								700: "#2A31D8", 800: "#252DAE", 900: "#262E89", 950: "#161950",
+							},
+							curva: { DEFAULT: "#3a656e", dark: "#2f545c", light: "#7fa8b1" },
+							gray: {
+								25: "#FCFCFD", 50: "#F9FAFB", 100: "#F2F4F7", 200: "#E4E7EC",
+								300: "#D0D5DD", 400: "#98A2B3", 500: "#667085", 600: "#475467",
+								700: "#344054", 800: "#1D2939", 900: "#101828", 950: "#0C111D",
+							},
+							"blue-light": {
+								25: "#F5FAFF", 50: "#EFF8FF", 100: "#D1E9FF", 200: "#B2DDFF",
+								300: "#84CAFF", 400: "#53B1FD", 500: "#2E90FA", 600: "#1570EF",
+								700: "#175CD3", 800: "#1849A9", 900: "#194185",
+							},
+							success: {
+								25: "#F6FEF9", 50: "#ECFDF3", 100: "#D1FADF", 200: "#A6F4C5",
+								300: "#6CE9A6", 400: "#32D583", 500: "#12B76A", 600: "#039855",
+								700: "#027A48", 800: "#05603A", 900: "#054F31",
+							},
+							warning: {
+								25: "#FFFCF5", 50: "#FFFAEB", 100: "#FEF0C7", 200: "#FEDF89",
+								300: "#FEC84B", 400: "#FDB022", 500: "#F79009", 600: "#DC6803",
+								700: "#B54708", 800: "#93370D", 900: "#7A2E0E",
+							},
+							error: {
+								25: "#FFFBFA", 50: "#FEF3F2", 100: "#FEE4E2", 200: "#FECDCA",
+								300: "#FDA29B", 400: "#F97066", 500: "#F04438", 600: "#D92D20",
+								700: "#B42318", 800: "#912018", 900: "#7A271A",
+							},
+						},
+						fontFamily: { sans: ["Outfit", "sans-serif"] },
+						boxShadow: {
+							"theme-xs": "0px 1px 2px 0px rgba(16, 24, 40, 0.05)",
+							"theme-sm": "0px 1px 3px 0px rgba(16, 24, 40, 0.10), 0px 1px 2px 0px rgba(16, 24, 40, 0.06)",
+							"theme-md": "0px 4px 8px -2px rgba(16, 24, 40, 0.10), 0px 2px 4px -2px rgba(16, 24, 40, 0.06)",
+							"theme-lg": "0px 12px 16px -4px rgba(16, 24, 40, 0.08), 0px 4px 6px -2px rgba(16, 24, 40, 0.03)",
+						},
+					},
+				},
 			};
 		</script>
+		<style is:inline>
+			.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; vertical-align: middle; }
+			html { scroll-behavior: smooth; }
+			body { background: #F9FAFB; }
+			html.dark body { background: #101828; }
+			.nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+			.nice-scroll::-webkit-scrollbar-thumb { background: #D0D5DD; border-radius: 8px; }
+			.nice-scroll::-webkit-scrollbar-thumb:hover { background: #98A2B3; }
+			html.dark .nice-scroll::-webkit-scrollbar-thumb { background: #344054; }
+			html.dark .nice-scroll::-webkit-scrollbar-thumb:hover { background: #475467; }
+			@keyframes pop-in { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }
+			.pop-in { animation: pop-in .15s ease-out both; }
+			@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+			.fade-in { animation: fade-in .12s ease-out both; }
+			/* Make form-input/select pick up dark mode automatically. */
+			.dark .form-input, .dark .form-select, .dark .form-textarea {
+				background-color: rgb(16 24 40);
+				border-color: rgb(52 64 84);
+				color: rgb(255 255 255 / 0.9);
+			}
+			.dark .form-input::placeholder, .dark .form-textarea::placeholder { color: rgb(255 255 255 / 0.3); }
+		</style>
 	</head>
-	<body class="font-sans text-slate-800 min-h-screen">
-		<!-- Top bar -->
-		<header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
-			<div class="max-w-[1400px] mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
-				<div class="flex items-center gap-3">
-					<div class="w-9 h-9 rounded-xl bg-primary text-white grid place-items-center font-bold">C</div>
-					<div>
-						<h1 class="text-base font-bold tracking-tight leading-none">CureVà Notify</h1>
-						<p class="text-xs text-slate-500 mt-0.5">Email &amp; notifications</p>
+	<body class="font-sans text-gray-700 antialiased dark:text-gray-300">
+		<!-- Mobile sidebar overlay -->
+		<div id="sidebar-overlay" class="hidden fixed inset-0 z-40 bg-gray-900/50 lg:hidden" onclick="sidebarToggle()"></div>
+
+		<!-- Sidebar (TailAdmin style: light, with brand accent on active) -->
+		<aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-[290px] -translate-x-full lg:translate-x-0 transition-transform duration-300 bg-white border-r border-gray-200 dark:bg-gray-900 dark:border-gray-800 flex flex-col">
+			<!-- Brand -->
+			<div class="flex items-center gap-3 px-6 h-[70px] shrink-0 border-b border-gray-200 dark:border-gray-800">
+				<div class="w-10 h-10 rounded-xl bg-curva text-white grid place-items-center font-bold text-base shadow-theme-sm">C</div>
+				<div>
+					<p class="text-sm font-semibold text-gray-800 dark:text-white/90 leading-none">CureVà Notify</p>
+					<p class="text-[11px] text-gray-400 dark:text-gray-500 mt-1">Email &amp; notifications</p>
+				</div>
+			</div>
+
+			<nav class="flex-1 px-4 py-5 space-y-6 overflow-y-auto nice-scroll">
+				<div>
+					<p class="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Email</p>
+					<div class="space-y-1">
+						<a href="#compose" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">send</span>Compose
+						</a>
+						<a href="#campaigns" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">schedule</span>Campaigns
+						</a>
+						<a href="#templates" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">description</span>Templates
+						</a>
 					</div>
 				</div>
-				<nav class="hidden sm:flex items-center gap-1 rounded-full bg-slate-100 p-1">
-					<a href="/" aria-current="page" class="inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-sm font-semibold text-slate-900 shadow-sm">
-						<span class="material-symbols-outlined text-base">mail</span>Email
-					</a>
-				</nav>
-				<a href="/logout" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-3.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition">
-					<span class="material-symbols-outlined text-base">logout</span>Sign out
+				<div>
+					<p class="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Insights</p>
+					<div class="space-y-1">
+						<a href="#analytics" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">monitoring</span>Analytics
+						</a>
+						<a href="#activity" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">history</span>Activity
+						</a>
+						<a href="#suppressed" class="nav-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-brand-50 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+							<span class="material-symbols-outlined text-xl">block</span>Suppressed
+						</a>
+					</div>
+				</div>
+				<div>
+					<p class="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Audience</p>
+					<div class="px-3.5 py-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-white/[0.03] dark:border-gray-800 space-y-2">
+						<div class="flex items-center justify-between text-xs"><span class="text-gray-600 dark:text-gray-400 font-medium">All active</span><span class="font-semibold text-gray-800 dark:text-white/90 tabular-nums">{counts.all}</span></div>
+						<div class="flex items-center justify-between text-xs"><span class="text-gray-500 dark:text-gray-400">Waiting</span><span class="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{counts.waiting}</span></div>
+						<div class="flex items-center justify-between text-xs"><span class="text-gray-500 dark:text-gray-400">Invited</span><span class="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{counts.invited}</span></div>
+						<div class="flex items-center justify-between text-xs"><span class="text-gray-500 dark:text-gray-400">Redeemed</span><span class="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{counts.redeemed}</span></div>
+					</div>
+				</div>
+			</nav>
+
+			<div class="px-4 py-4 border-t border-gray-200 dark:border-gray-800 space-y-2 shrink-0">
+				<div class={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${sesConfigured ? "text-success-700 bg-success-50 dark:text-success-500 dark:bg-success-500/10" : "text-warning-700 bg-warning-50 dark:text-warning-400 dark:bg-warning-500/10"}`}>
+					<span class="relative flex h-2 w-2">
+						<span class={`absolute inline-flex h-full w-full rounded-full opacity-60 ${sesConfigured ? "bg-success-500 animate-ping" : "bg-warning-500"}`}></span>
+						<span class={`relative inline-flex h-2 w-2 rounded-full ${sesConfigured ? "bg-success-500" : "bg-warning-500"}`}></span>
+					</span>
+					{sesConfigured ? "SES connected" : "SES not configured"}
+				</div>
+				<a href="/logout" class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-white transition">
+					<span class="material-symbols-outlined text-xl">logout</span>Sign out
 				</a>
 			</div>
-		</header>
+		</aside>
 
-		<main class="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
-			{loadError && (
-				<div class="rounded-xl border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
-					<strong>Couldn’t load the email page:</strong> {loadError}
+		<!-- Content -->
+		<div class="lg:pl-[290px] min-h-screen flex flex-col">
+			<!-- Top header -->
+			<header class="sticky top-0 z-30 bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800">
+				<div class="px-4 sm:px-6 lg:px-8 h-[70px] flex items-center justify-between gap-4">
+					<div class="flex items-center gap-3">
+						<button type="button" onclick="sidebarToggle()" class="lg:hidden grid h-10 w-10 place-items-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-white/[0.03] transition">
+							<span class="material-symbols-outlined">menu</span>
+						</button>
+						<div class="hidden sm:block">
+							<h1 class="text-base font-semibold text-gray-800 dark:text-white/90">Email dashboard</h1>
+							<p class="text-xs text-gray-400 dark:text-gray-500">Utah · Mountain Time</p>
+						</div>
+					</div>
+					<div class="flex items-center gap-2">
+						<span class="hidden md:inline-flex items-center gap-1.5 rounded-full bg-gray-50 border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 dark:bg-white/[0.03] dark:border-gray-800 dark:text-gray-300">
+							<span class="material-symbols-outlined text-sm text-gray-400">group</span>{counts.all} subscribers
+						</span>
+						<button type="button" onclick="toggleTheme()" title="Toggle theme"
+							class="grid h-10 w-10 place-items-center rounded-full text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/[0.05] transition">
+							<span class="material-symbols-outlined text-xl dark:hidden">dark_mode</span>
+							<span class="material-symbols-outlined text-xl hidden dark:inline">light_mode</span>
+						</button>
+						<button type="button" onclick="openTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition">
+							<span class="material-symbols-outlined text-base">add</span><span class="hidden sm:inline">New template</span>
+						</button>
+						<div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+						<a href="/logout" title="Sign out" class="grid h-10 w-10 place-items-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-white/[0.03] dark:text-gray-400 dark:hover:bg-white/[0.06] transition">
+							<span class="material-symbols-outlined text-lg">logout</span>
+						</a>
+					</div>
 				</div>
-			)}
+			</header>
 
-			{!sesConfigured && (
-				<div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-4 py-3 text-sm flex items-start gap-2">
-					<span class="material-symbols-outlined text-base mt-0.5">warning</span>
+			<main class="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-8 w-full max-w-[96rem] mx-auto space-y-6">
+				{loadError && (
+					<div class="rounded-2xl bg-white border border-error-200 px-5 py-4 text-sm text-error-700 shadow-theme-xs dark:bg-white/[0.03] dark:border-error-500/30 dark:text-error-400">
+						<strong>Couldn't load the email page:</strong> {loadError}
+					</div>
+				)}
+
+				{!sesConfigured && (
+					<div class="rounded-2xl bg-warning-50 border border-warning-200 px-5 py-4 text-sm text-warning-700 flex items-start gap-3 dark:bg-warning-500/10 dark:border-warning-500/20 dark:text-warning-400">
+						<span class="material-symbols-outlined text-xl mt-0.5">warning</span>
+						<div>
+							<strong class="font-semibold">SES not configured.</strong> Sending is disabled until the AWS secrets are set on this Worker:
+							<code class="px-1.5 py-0.5 rounded bg-warning-100 dark:bg-white/[0.06] text-xs">AWS_REGION</code>,
+							<code class="px-1.5 py-0.5 rounded bg-warning-100 dark:bg-white/[0.06] text-xs">AWS_ACCESS_KEY_ID</code>,
+							<code class="px-1.5 py-0.5 rounded bg-warning-100 dark:bg-white/[0.06] text-xs">AWS_SECRET_ACCESS_KEY</code>.
+							You can still edit &amp; preview templates below.
+						</div>
+					</div>
+				)}
+
+				{/* ---- Page title ---- */}
+				<div class="flex items-end justify-between flex-wrap gap-4">
 					<div>
-						<strong>SES not configured.</strong> Sending is disabled until the AWS secrets are set on this Worker:
-						<code class="px-1 rounded bg-amber-100">AWS_REGION</code>,
-						<code class="px-1 rounded bg-amber-100">AWS_ACCESS_KEY_ID</code>,
-						<code class="px-1 rounded bg-amber-100">AWS_SECRET_ACCESS_KEY</code>.
-						You can still preview templates below.
+						<h2 class="text-2xl font-semibold text-gray-800 dark:text-white/90">Email dashboard</h2>
+						<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Send campaigns to the waitlist, manage templates, and track delivery.</p>
 					</div>
+					<nav class="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5">
+						<span class="material-symbols-outlined text-sm">home</span>
+						<span>/</span>
+						<span class="text-gray-800 dark:text-white/90 font-medium">Dashboard</span>
+					</nav>
 				</div>
-			)}
 
-			{!loadError && (
-				<div id="cp-container" class="flex flex-col lg:flex-row gap-5 lg:gap-0 items-stretch" style="--left-w: 50%">
-					{/* ---- Compose ---- */}
-					<section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-4 w-full lg:w-[var(--left-w)] lg:shrink-0 min-w-0">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">send</span>Compose &amp; send
-						</h2>
+				{!loadError && (
+					<div id="cp-container" class="flex flex-col xl:flex-row gap-6 xl:gap-0 items-stretch scroll-mt-24" style="--left-w: 50%" >
+						{/* ---- Compose ---- */}
+						<section id="compose" class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs w-full xl:w-[var(--left-w)] xl:shrink-0 min-w-0 scroll-mt-24 dark:bg-white/[0.03] dark:border-gray-800">
+							<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+								<div class="flex items-center gap-2.5">
+									<span class="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400">
+										<span class="material-symbols-outlined">send</span>
+									</span>
+									<div>
+										<h3 class="font-semibold text-gray-800 dark:text-white/90">Compose &amp; send</h3>
+										<p class="text-xs text-gray-400 dark:text-gray-500">Pick a template and audience.</p>
+									</div>
+								</div>
+							</header>
+							<div class="p-5 space-y-5">
+								<div>
+									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Template</label>
+									<select id="template" onchange="updatePreview()" class="form-select w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+										{templates.map((t) => <option value={t.id}>{t.name}</option>)}
+									</select>
+								</div>
 
-						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Template</label>
-							<select id="template" onchange="updatePreview()" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20">
-								{templates.map((t) => <option value={t.id}>{t.name}</option>)}
-							</select>
-						</div>
+								<div>
+									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Audience <span class="text-xs font-normal text-gray-400 dark:text-gray-500">— active subscribers only</span></label>
+									<select id="audience" class="form-select w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+										<option value="all">All active — {counts.all}</option>
+										<option value="waiting">Waiting — {counts.waiting}</option>
+										<option value="invited">Invited — {counts.invited}</option>
+										<option value="redeemed">Redeemed — {counts.redeemed}</option>
+									</select>
+								</div>
 
-						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Audience (active subscribers only)</label>
-							<select id="audience" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20">
-								<option value="all">All active — {counts.all}</option>
-								<option value="waiting">Waiting — {counts.waiting}</option>
-								<option value="invited">Invited — {counts.invited}</option>
-								<option value="redeemed">Redeemed — {counts.redeemed}</option>
-							</select>
-						</div>
+								<div id="discount-wrap" class="hidden">
+									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Shared discount code <span class="text-xs font-normal text-gray-400 dark:text-gray-500">— optional override</span></label>
+									<input id="discount" type="text" placeholder="e.g. CUREVA15" oninput="updatePreview()" class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90" />
+									<p class="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Leave blank to use each subscriber's own code from the waitlist.</p>
+								</div>
 
-						<div id="discount-wrap" class="hidden">
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Shared discount code (optional override)</label>
-							<input id="discount" type="text" placeholder="e.g. CUREVA15" oninput="updatePreview()" class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
-							<p class="text-xs text-slate-400 mt-1">Leave blank to use each subscriber's own code from the waitlist.</p>
-						</div>
+								<div>
+									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">When</label>
+									<div class="flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-800 dark:bg-white/[0.03]">
+										<button type="button" id="when-now" onclick="setWhen('now')"
+											class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm bg-white text-gray-800 font-semibold shadow-theme-xs transition dark:bg-gray-900 dark:text-white/90">
+											<span class="material-symbols-outlined text-base">bolt</span>Send now
+										</button>
+										<button type="button" id="when-later" onclick="setWhen('later')"
+											class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white transition">
+											<span class="material-symbols-outlined text-base">event</span>Schedule
+										</button>
+									</div>
+								</div>
 
-						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">When</label>
-							<div class="grid grid-cols-2 gap-2">
-								<button type="button" id="when-now" onclick="setWhen('now')"
-									class="rounded-xl border px-3 py-2 text-sm font-medium transition border-primary bg-primary/10 text-primary">
-									Send now
-								</button>
-								<button type="button" id="when-later" onclick="setWhen('later')"
-									class="rounded-xl border px-3 py-2 text-sm font-medium transition border-slate-200 text-slate-600 hover:bg-slate-50">
-									Schedule
-								</button>
-							</div>
-						</div>
+								<div id="schedule-wrap" class="hidden">
+									<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Date &amp; time <span class="text-xs font-normal text-gray-400 dark:text-gray-500">— Utah (Mountain Time)</span></label>
+									<input id="schedule-at" type="hidden" />
+									<div id="dtp-root" class="relative">
+										<button type="button" id="dtp-trigger" onclick="dtpToggle()"
+											class="w-full flex items-center justify-between gap-2 rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-left shadow-theme-xs hover:border-gray-400 focus:outline-none focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 transition dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600">
+											<span class="flex items-center gap-2 min-w-0">
+												<span class="material-symbols-outlined text-base text-gray-400">calendar_month</span>
+												<span id="dtp-label" class="truncate text-gray-400 dark:text-gray-500">Pick a date &amp; time…</span>
+											</span>
+											<span class="material-symbols-outlined text-base text-gray-400">expand_more</span>
+										</button>
 
-						<div id="schedule-wrap" class="hidden">
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Date &amp; time · Utah (Mountain Time)</label>
-							<input id="schedule-at" type="datetime-local" oninput="updateScheduleEcho()"
-								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
-							<p id="schedule-echo" class="text-xs text-slate-400 mt-1">Sends automatically at this Mountain Time (checked every ~5 min).</p>
-						</div>
-
-						<button id="send-btn" type="button" onclick="submitCampaign()" disabled={!sesConfigured}
-							class="w-full inline-flex items-center justify-center gap-2 rounded-full bg-primary text-white px-4 py-3 text-sm font-semibold hover:bg-primary-dark transition disabled:opacity-50 disabled:cursor-not-allowed">
-							<span class="material-symbols-outlined text-base" id="send-btn-icon">send</span><span id="send-btn-label">Send campaign</span>
-						</button>
-						<div id="send-result" class="hidden rounded-xl px-4 py-3 text-sm"></div>
-					</section>
-
-					{/* ---- Drag-to-resize divider (lg+ only) ---- */}
-					<div id="cp-splitter" title="Drag to resize" class="hidden lg:flex items-center justify-center w-4 shrink-0 cursor-col-resize group select-none touch-none">
-						<div class="h-16 w-1 rounded-full bg-slate-200 group-hover:bg-primary transition-colors"></div>
-					</div>
-
-					{/* ---- Preview ---- */}
-					<section class="rounded-2xl border border-slate-200 bg-white shadow-sm p-5 space-y-3 w-full lg:flex-1 min-w-0">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">visibility</span>Preview
-						</h2>
-						<div class="text-xs text-slate-500">Subject: <span id="preview-subject" class="font-medium text-slate-800"></span></div>
-						<iframe id="preview-frame" title="Email preview" class="w-full h-[600px] rounded-xl border border-slate-200 bg-white"></iframe>
-						<p class="text-xs text-slate-400">Preview uses sample values (<code>name → Ava</code>). Real sends personalize per subscriber.</p>
-					</section>
-				</div>
-			)}
-
-			{/* ---- Scheduled campaigns ---- */}
-			{!loadError && campaigns.length > 0 && (
-				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">schedule</span>Scheduled campaigns
-						</h2>
-						<span class="text-xs text-slate-400">times in Mountain Time (Utah)</span>
-					</div>
-					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
-							<thead>
-								<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
-									<th class="font-semibold px-5 py-3">Template</th>
-									<th class="font-semibold px-5 py-3">Audience</th>
-									<th class="font-semibold px-5 py-3 whitespace-nowrap">When (MT)</th>
-									<th class="font-semibold px-5 py-3">Status</th>
-									<th class="font-semibold px-5 py-3 text-right">Actions</th>
-								</tr>
-							</thead>
-							<tbody>
-								{campaigns.map((c) => (
-									<tr class="border-b border-slate-50 last:border-0">
-										<td class="px-5 py-3 text-slate-700">{templateName(c.template_id)}</td>
-										<td class="px-5 py-3 text-slate-500">{AUDIENCE_LABEL[c.audience] ?? c.audience}</td>
-										<td class="px-5 py-3 text-slate-500 whitespace-nowrap">{fmtSchedule(c.scheduled_at)}</td>
-										<td class="px-5 py-3">
-											<span class={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${CAMPAIGN_STATUS_CLASS[c.status] ?? "bg-slate-100 text-slate-600"}`}>{c.status}</span>
-											{c.status === "sent" && c.total != null && (
-												<span class="ml-1 text-xs text-slate-400">{c.sent}/{c.total}{c.failed ? ` · ${c.failed} failed` : ""}</span>
-											)}
-											{c.status === "failed" && c.error_message && (
-												<span class="ml-1 text-xs text-red-500" title={c.error_message}>· error</span>
-											)}
-										</td>
-										<td class="px-5 py-3 text-right">
-											{c.status === "scheduled" && (
-												<button type="button" onclick={`cancelCampaign(${JSON.stringify(c.id)})`}
-													class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 h-7 text-xs font-medium text-slate-600 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition">
-													<span class="material-symbols-outlined text-sm">close</span>Cancel
+										{/* Calendar + time popover */}
+										<div id="dtp" class="hidden absolute z-40 mt-2 left-0 w-full sm:w-[340px] rounded-xl bg-white border border-gray-200 shadow-theme-lg p-4 pop-in dark:bg-gray-900 dark:border-gray-800">
+											<div class="flex items-center justify-between mb-2">
+												<button type="button" onclick="dtpPrev()" class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition">
+													<span class="material-symbols-outlined text-base">chevron_left</span>
 												</button>
-											)}
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				</section>
-			)}
+												<p id="dtp-month-label" class="text-sm font-semibold text-gray-800 dark:text-white/90"></p>
+												<button type="button" onclick="dtpNext()" class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition">
+													<span class="material-symbols-outlined text-base">chevron_right</span>
+												</button>
+											</div>
+											<div class="grid grid-cols-7 text-center text-[11px] font-semibold text-gray-400 mb-1">
+												<span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+											</div>
+											<div id="dtp-days" class="grid grid-cols-7 gap-0.5"></div>
 
-			{/* ---- Templates ---- */}
-			{!loadError && (
-				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">description</span>Templates
-							<span id="tpl-count" class="text-xs font-normal text-slate-400">({templates.length})</span>
-						</h2>
-						<button type="button" onclick="openTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-3.5 py-1.5 text-sm font-semibold hover:bg-primary-dark transition">
-							<span class="material-symbols-outlined text-base">add</span>New template
-						</button>
-					</div>
-					<div id="tpl-list" class="divide-y divide-slate-50">
-						{templates.length === 0 ? (
-							<div class="px-6 py-12 text-center text-slate-400 text-sm">No templates yet. Create one to start sending.</div>
-						) : (
-							templates.map((t) => (
-								<div class="px-5 py-3.5 flex items-center justify-between gap-4">
-									<div class="min-w-0">
-										<p class="text-sm font-medium text-slate-800 truncate">{t.name}</p>
-										<p class="text-xs text-slate-400 truncate">{t.subject}</p>
-									</div>
-									<div class="flex items-center gap-1 shrink-0">
-										<button type="button" onclick={`openTestModal(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Send a test email to yourself"
-											class="inline-flex items-center gap-1 rounded-full border border-slate-200 pl-2 pr-3 h-8 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-200 transition">
-											<span class="material-symbols-outlined text-sm">forward_to_inbox</span>Send test
-										</button>
-										<button type="button" onclick={`openTemplateEditor(${JSON.stringify(t.id)})`} title="Edit"
-											class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
-											<span class="material-symbols-outlined text-base">edit</span>
-										</button>
-										<button type="button" onclick={`deleteTemplate(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Delete"
-											class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition">
-											<span class="material-symbols-outlined text-base">delete</span>
-										</button>
-									</div>
-								</div>
-							))
-						)}
-					</div>
-				</section>
-			)}
+											<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-800 flex items-center gap-2">
+												<span class="material-symbols-outlined text-base text-gray-400">schedule</span>
+												<select id="dtp-hour" class="form-select rounded-lg border border-gray-300 bg-transparent py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"></select>
+												<span class="text-gray-400 font-semibold">:</span>
+												<select id="dtp-min" class="form-select rounded-lg border border-gray-300 bg-transparent py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"></select>
+												<div class="ml-auto flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-700">
+													<button type="button" id="dtp-am" onclick="dtpSetAmPm('AM')" class="rounded-md px-2.5 py-1 text-xs font-semibold bg-brand-500 text-white transition">AM</button>
+													<button type="button" id="dtp-pm" onclick="dtpSetAmPm('PM')" class="rounded-md px-2.5 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 transition">PM</button>
+												</div>
+											</div>
 
-			{/* ---- Analytics ---- */}
-			{!loadError && (
-				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">monitoring</span>Analytics
-						</h2>
-						<span class="text-xs text-slate-400">all-time</span>
-					</div>
-					{stats.total === 0 ? (
-						<div class="px-6 py-12 text-center text-slate-400 text-sm">
-							No email activity yet. Open &amp; click stats appear here once you send a campaign.
-						</div>
-					) : (
-						<div class="p-5 space-y-5">
-							<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-								<div class="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-slate-400 font-medium">Sent</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.sent}</p>
+											<div class="mt-3 flex flex-wrap gap-1.5">
+												<button type="button" onclick="dtpPreset('plus1h')" class="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-300 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400 dark:hover:border-brand-700 dark:hover:text-brand-400 transition">In 1 hour</button>
+												<button type="button" onclick="dtpPreset('tomorrow9')" class="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-300 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400 dark:hover:border-brand-700 dark:hover:text-brand-400 transition">Tomorrow 9 AM</button>
+												<button type="button" onclick="dtpPreset('monday9')" class="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-brand-300 hover:text-brand-500 dark:border-gray-700 dark:text-gray-400 dark:hover:border-brand-700 dark:hover:text-brand-400 transition">Monday 9 AM</button>
+											</div>
+
+											<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
+												<button type="button" onclick="dtpClear()" class="text-xs font-medium text-gray-400 hover:text-error-500 transition">Clear</button>
+												<button type="button" onclick="dtpToggle()" class="rounded-lg bg-brand-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-600 transition">Done</button>
+											</div>
+										</div>
+									</div>
+									<p id="schedule-echo" class="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Sends automatically at this Mountain Time (checked every ~5 min).</p>
 								</div>
-								<div class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-emerald-600 font-medium">Delivered</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.delivered}</p>
-									<p class="text-xs text-emerald-700 font-medium">{pct(stats.delivered, stats.sent)} of sent</p>
-								</div>
-								<div class="rounded-xl border border-sky-100 bg-sky-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-sky-600 font-medium">Opened</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.opened}</p>
-									<p class="text-xs text-sky-700 font-medium">{pct(stats.opened, stats.delivered)} of delivered</p>
-								</div>
-								<div class="rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-indigo-600 font-medium">Clicked</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.clicked}</p>
-									<p class="text-xs text-indigo-700 font-medium">{pct(stats.clicked, stats.delivered)} of delivered</p>
-								</div>
-								<div class="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-amber-600 font-medium">Bounced</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.bounced}</p>
-									<p class="text-xs text-amber-700 font-medium">{pct(stats.bounced, stats.sent)} of sent</p>
-								</div>
-								<div class="rounded-xl border border-rose-100 bg-rose-50/60 px-4 py-3">
-									<p class="text-[11px] uppercase tracking-wide text-rose-600 font-medium">Complaints</p>
-									<p class="text-2xl font-bold text-slate-900 leading-tight">{stats.complained}</p>
-									{stats.failed > 0 && <p class="text-xs text-red-600 font-medium">{stats.failed} failed</p>}
-								</div>
+
+								<button id="send-btn" type="button" onclick="submitCampaign()" disabled={!sesConfigured}
+									class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed">
+									<span class="material-symbols-outlined text-base" id="send-btn-icon">send</span><span id="send-btn-label">Send campaign</span>
+								</button>
+								<div id="send-result" class="hidden rounded-lg px-4 py-3 text-sm"></div>
 							</div>
+						</section>
 
-							{templateStats.length > 0 && (
-								<div class="overflow-x-auto">
-									<table class="w-full text-sm">
-										<thead>
-											<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
-												<th class="font-semibold px-3 py-2">Template</th>
-												<th class="font-semibold px-3 py-2 text-right">Sent</th>
-												<th class="font-semibold px-3 py-2 text-right">Delivered</th>
-												<th class="font-semibold px-3 py-2 text-right">Opened</th>
-												<th class="font-semibold px-3 py-2 text-right">Clicked</th>
-												<th class="font-semibold px-3 py-2 text-right">Bounced</th>
-											</tr>
-										</thead>
-										<tbody>
-											{templateStats.map((t) => (
-												<tr class="border-b border-slate-50 last:border-0">
-													<td class="px-3 py-2 text-slate-700">{templateName(t.template_id)}</td>
-													<td class="px-3 py-2 text-right text-slate-700 tabular-nums">{t.sent}</td>
-													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.delivered} <span class="text-slate-300">({pct(t.delivered, t.sent)})</span></td>
-													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.opened} <span class="text-slate-300">({pct(t.opened, t.delivered)})</span></td>
-													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.clicked} <span class="text-slate-300">({pct(t.clicked, t.delivered)})</span></td>
-													<td class="px-3 py-2 text-right text-slate-500 tabular-nums">{t.bounced}</td>
-												</tr>
-											))}
-										</tbody>
-									</table>
-								</div>
-							)}
+						{/* ---- Drag-to-resize divider (xl+ only) ---- */}
+						<div id="cp-splitter" title="Drag to resize" class="hidden xl:flex items-center justify-center w-6 shrink-0 cursor-col-resize group select-none touch-none">
+							<div class="h-14 w-1 rounded-full bg-gray-300 group-hover:bg-brand-500 group-hover:h-20 transition-all dark:bg-gray-700"></div>
 						</div>
-					)}
-				</section>
-			)}
 
-			{/* ---- Recent sends ---- */}
-			{!loadError && (
-				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-					<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">history</span>Recent sends
-						</h2>
-						<span class="text-xs text-slate-400">{logs.length} most recent</span>
+						{/* ---- Preview ---- */}
+						<section class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs w-full xl:flex-1 min-w-0 flex flex-col dark:bg-white/[0.03] dark:border-gray-800">
+							<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+								<div class="min-w-0 flex items-center gap-2.5">
+									<span class="grid h-9 w-9 place-items-center rounded-lg bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500">
+										<span class="material-symbols-outlined">visibility</span>
+									</span>
+									<div class="min-w-0">
+										<h3 class="font-semibold text-gray-800 dark:text-white/90">Live preview</h3>
+										<p class="text-xs text-gray-400 dark:text-gray-500 truncate">Subject: <span id="preview-subject" class="font-medium text-gray-600 dark:text-gray-300"></span></p>
+									</div>
+								</div>
+								<span class="inline-flex items-center gap-1.5 rounded-full bg-success-50 px-2.5 py-0.5 text-xs font-medium text-success-700 dark:bg-success-500/15 dark:text-success-500">
+									<span class="h-1.5 w-1.5 rounded-full bg-success-500 animate-pulse"></span>Live
+								</span>
+							</header>
+							<div class="p-5 flex-1">
+								<iframe id="preview-frame" title="Email preview" class="w-full h-[600px] rounded-lg border border-gray-200 bg-white dark:border-gray-800"></iframe>
+								<p class="text-xs text-gray-400 dark:text-gray-500 mt-2.5">Preview uses sample values (<code class="px-1 rounded bg-gray-100 dark:bg-white/[0.06]">name → Ava</code>). Real sends personalize per subscriber.</p>
+							</div>
+						</section>
 					</div>
-					{logs.length === 0 ? (
-						<div class="px-6 py-12 text-center text-slate-400 text-sm">No emails sent yet.</div>
-					) : (
-						<div class="overflow-x-auto">
+				)}
+
+				{/* ---- Scheduled campaigns ---- */}
+				{!loadError && campaigns.length > 0 && (
+					<section id="campaigns" class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs scroll-mt-24 dark:bg-white/[0.03] dark:border-gray-800">
+						<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+							<div class="flex items-center gap-2.5">
+								<span class="grid h-9 w-9 place-items-center rounded-lg bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/15 dark:text-blue-light-400">
+									<span class="material-symbols-outlined">schedule</span>
+								</span>
+								<h3 class="font-semibold text-gray-800 dark:text-white/90">Scheduled campaigns</h3>
+							</div>
+							<span class="text-xs text-gray-400 dark:text-gray-500">times in Mountain Time (Utah)</span>
+						</header>
+						<div class="overflow-x-auto nice-scroll">
 							<table class="w-full text-sm">
-								<thead>
-									<tr class="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
-										<th class="font-semibold px-5 py-3">Recipient</th>
-										<th class="font-semibold px-5 py-3">Template</th>
-										<th class="font-semibold px-5 py-3">Status</th>
-										<th class="font-semibold px-5 py-3 whitespace-nowrap">Sent</th>
-										<th class="font-semibold px-5 py-3 whitespace-nowrap">Delivered</th>
+								<thead class="text-xs font-semibold uppercase text-gray-500 bg-gray-50 border-b border-gray-200 dark:bg-white/[0.02] dark:border-gray-800 dark:text-gray-400">
+									<tr>
+										<th class="px-5 py-3 text-left whitespace-nowrap">Template</th>
+										<th class="px-5 py-3 text-left whitespace-nowrap">Audience</th>
+										<th class="px-5 py-3 text-left whitespace-nowrap">When (MT)</th>
+										<th class="px-5 py-3 text-left whitespace-nowrap">Status</th>
+										<th class="px-5 py-3 text-right whitespace-nowrap">Actions</th>
 									</tr>
 								</thead>
-								<tbody>
-									{logs.map((l) => (
-										<tr class="border-b border-slate-50 last:border-0">
-											<td class="px-5 py-3 text-slate-700">{l.email}</td>
-											<td class="px-5 py-3 text-slate-500">{templateName(l.template_id)}</td>
-											<td class="px-5 py-3">
-												<span class={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${logClass(l.status)}`}>{l.status}</span>
-												{l.bounce_reason && <span class="ml-1 text-xs text-amber-600">({l.bounce_reason})</span>}
-												{l.error_message && <span class="ml-1 text-xs text-red-500" title={l.error_message}>· error</span>}
+								<tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+									{campaigns.map((c) => (
+										<tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition">
+											<td class="px-5 py-3.5 font-medium text-gray-800 dark:text-white/90">{templateName(c.template_id)}</td>
+											<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400">{AUDIENCE_LABEL[c.audience] ?? c.audience}</td>
+											<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400 whitespace-nowrap">{fmtSchedule(c.scheduled_at)}</td>
+											<td class="px-5 py-3.5">
+												<span class={`${PILL} ${CAMPAIGN_STATUS_CLASS[c.status] ?? "bg-gray-100 text-gray-600 dark:bg-white/[0.03] dark:text-gray-400"}`}>{c.status}</span>
+												{c.status === "sent" && c.total != null && (
+													<span class="ml-1.5 text-xs text-gray-400">{c.sent}/{c.total}{c.failed ? ` · ${c.failed} failed` : ""}</span>
+												)}
+												{c.status === "failed" && c.error_message && (
+													<span class="ml-1.5 text-xs text-error-500" title={c.error_message}>· error</span>
+												)}
 											</td>
-											<td class="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtTs(l.sent_at)}</td>
-											<td class="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtTs(l.delivered_at)}</td>
+											<td class="px-5 py-3.5 text-right">
+												{c.status === "scheduled" && (
+													<button type="button" onclick={`cancelCampaign(${JSON.stringify(c.id)})`}
+														class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:border-error-300 hover:text-error-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-error-500/50 dark:hover:text-error-400 transition">
+														<span class="material-symbols-outlined text-sm">close</span>Cancel
+													</button>
+												)}
+											</td>
 										</tr>
 									))}
 								</tbody>
 							</table>
 						</div>
-					)}
-				</section>
-			)}
+					</section>
+				)}
 
-			{/* ---- Suppression list ---- */}
-			{!loadError && suppressed.length > 0 && (
-				<section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-					<div class="px-5 py-4 border-b border-slate-100">
-						<h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-							<span class="material-symbols-outlined text-primary">block</span>Suppressed addresses
-							<span class="text-xs font-normal text-slate-400">({suppressed.length})</span>
-						</h2>
-					</div>
-					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
-							<tbody>
-								{suppressed.map((s) => (
-									<tr class="border-b border-slate-50 last:border-0">
-										<td class="px-5 py-2.5 text-slate-700">{s.email}</td>
-										<td class="px-5 py-2.5"><span class="rounded-full bg-slate-100 text-slate-600 px-2.5 py-0.5 text-xs">{s.reason}</span></td>
-										<td class="px-5 py-2.5 text-slate-400 whitespace-nowrap text-right">{fmtTs(s.added_at)}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				</section>
-			)}
-		</main>
+				{/* ---- Templates ---- */}
+				{!loadError && (
+					<section id="templates" class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs scroll-mt-24 dark:bg-white/[0.03] dark:border-gray-800">
+						<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+							<div class="flex items-center gap-2.5">
+								<span class="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400">
+									<span class="material-symbols-outlined">description</span>
+								</span>
+								<h3 class="font-semibold text-gray-800 dark:text-white/90">Templates
+									<span id="tpl-count" class="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">({templates.length})</span>
+								</h3>
+							</div>
+							<button type="button" onclick="openTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition">
+								<span class="material-symbols-outlined text-base">add</span>New template
+							</button>
+						</header>
+						<div id="tpl-list" class="divide-y divide-gray-200 dark:divide-gray-800">
+							{templates.length === 0 ? (
+								<div class="px-6 py-12 text-center text-sm text-gray-400 dark:text-gray-500">No templates yet. Create one to start sending.</div>
+							) : (
+								templates.map((t) => (
+									<div class="px-5 py-4 flex items-center justify-between gap-4 hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition">
+										<div class="flex items-center gap-3 min-w-0">
+											<div class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400">
+												<span class="material-symbols-outlined text-lg">mail</span>
+											</div>
+											<div class="min-w-0">
+												<p class="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{t.name}</p>
+												<p class="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5">{t.subject}</p>
+											</div>
+										</div>
+										<div class="flex items-center gap-1.5 shrink-0">
+											<button type="button" onclick={`openTestModal(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Send a test email to yourself"
+												class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-blue-light-300 hover:text-blue-light-700 dark:border-gray-700 dark:text-gray-300 dark:hover:border-blue-light-500/50 dark:hover:text-blue-light-400 transition">
+												<span class="material-symbols-outlined text-sm">forward_to_inbox</span>Send test
+											</button>
+											<button type="button" onclick={`openTemplateEditor(${JSON.stringify(t.id)})`} title="Edit"
+												class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition">
+												<span class="material-symbols-outlined text-base">edit</span>
+											</button>
+											<button type="button" onclick={`deleteTemplate(${JSON.stringify(t.id)}, ${JSON.stringify(t.name)})`} title="Delete"
+												class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition">
+												<span class="material-symbols-outlined text-base">delete</span>
+											</button>
+										</div>
+									</div>
+								))
+							)}
+						</div>
+					</section>
+				)}
+
+				{/* ---- Analytics ---- */}
+				{!loadError && (
+					<section id="analytics" class="scroll-mt-24">
+						<div class="flex items-center justify-between mb-4">
+							<div class="flex items-center gap-2.5">
+								<span class="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400">
+									<span class="material-symbols-outlined">monitoring</span>
+								</span>
+								<h3 class="font-semibold text-gray-800 dark:text-white/90">Analytics</h3>
+							</div>
+							<span class="text-xs text-gray-400 dark:text-gray-500">all-time</span>
+						</div>
+						{stats.total === 0 ? (
+							<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs px-6 py-12 text-center text-sm text-gray-400 dark:bg-white/[0.03] dark:border-gray-800 dark:text-gray-500">
+								No email activity yet. Open &amp; click stats appear here once you send a campaign.
+							</div>
+						) : (
+							<div class="space-y-6">
+								<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Sent</p>
+											<span class="grid h-8 w-8 place-items-center rounded-full bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
+												<span class="material-symbols-outlined text-base">send</span>
+											</span>
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.sent}</p>
+									</div>
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Delivered</p>
+											<span class={`${PILL} bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-500`}>{pct(stats.delivered, stats.sent)}</span>
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.delivered}</p>
+									</div>
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Opened</p>
+											<span class={`${PILL} bg-blue-light-50 text-blue-light-700 dark:bg-blue-light-500/15 dark:text-blue-light-400`}>{pct(stats.opened, stats.delivered)}</span>
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.opened}</p>
+									</div>
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Clicked</p>
+											<span class={`${PILL} bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400`}>{pct(stats.clicked, stats.delivered)}</span>
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.clicked}</p>
+									</div>
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Bounced</p>
+											<span class={`${PILL} bg-warning-50 text-warning-700 dark:bg-warning-500/15 dark:text-orange-400`}>{pct(stats.bounced, stats.sent)}</span>
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.bounced}</p>
+									</div>
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs p-5 dark:bg-white/[0.03] dark:border-gray-800">
+										<div class="flex items-center justify-between">
+											<p class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Complaints</p>
+											{stats.failed > 0 && <span class={`${PILL} bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-500`}>{stats.failed} failed</span>}
+										</div>
+										<p class="text-2xl font-bold text-gray-800 dark:text-white/90 mt-3 tabular-nums">{stats.complained}</p>
+									</div>
+								</div>
+
+								{templateStats.length > 0 && (
+									<div class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs overflow-hidden dark:bg-white/[0.03] dark:border-gray-800">
+										<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
+											<h3 class="font-semibold text-gray-800 dark:text-white/90 text-sm">Per template</h3>
+										</header>
+										<div class="overflow-x-auto nice-scroll">
+											<table class="w-full text-sm">
+												<thead class="text-xs font-semibold uppercase text-gray-500 bg-gray-50 border-b border-gray-200 dark:bg-white/[0.02] dark:border-gray-800 dark:text-gray-400">
+													<tr>
+														<th class="px-5 py-3 text-left">Template</th>
+														<th class="px-5 py-3 text-right">Sent</th>
+														<th class="px-5 py-3 text-right">Delivered</th>
+														<th class="px-5 py-3 text-right">Opened</th>
+														<th class="px-5 py-3 text-right">Clicked</th>
+														<th class="px-5 py-3 text-right">Bounced</th>
+													</tr>
+												</thead>
+												<tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+													{templateStats.map((t) => (
+														<tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition">
+															<td class="px-5 py-3.5 font-medium text-gray-800 dark:text-white/90">{templateName(t.template_id)}</td>
+															<td class="px-5 py-3.5 text-right text-gray-700 dark:text-gray-300 tabular-nums">{t.sent}</td>
+															<td class="px-5 py-3.5 text-right text-gray-500 dark:text-gray-400 tabular-nums">{t.delivered} <span class="text-gray-300 dark:text-gray-600">({pct(t.delivered, t.sent)})</span></td>
+															<td class="px-5 py-3.5 text-right text-gray-500 dark:text-gray-400 tabular-nums">{t.opened} <span class="text-gray-300 dark:text-gray-600">({pct(t.opened, t.delivered)})</span></td>
+															<td class="px-5 py-3.5 text-right text-gray-500 dark:text-gray-400 tabular-nums">{t.clicked} <span class="text-gray-300 dark:text-gray-600">({pct(t.clicked, t.delivered)})</span></td>
+															<td class="px-5 py-3.5 text-right text-gray-500 dark:text-gray-400 tabular-nums">{t.bounced}</td>
+														</tr>
+													))}
+												</tbody>
+											</table>
+										</div>
+									</div>
+								)}
+							</div>
+						)}
+					</section>
+				)}
+
+				{/* ---- Recent sends ---- */}
+				{!loadError && (
+					<section id="activity" class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs scroll-mt-24 dark:bg-white/[0.03] dark:border-gray-800">
+						<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+							<div class="flex items-center gap-2.5">
+								<span class="grid h-9 w-9 place-items-center rounded-lg bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-300">
+									<span class="material-symbols-outlined">history</span>
+								</span>
+								<h3 class="font-semibold text-gray-800 dark:text-white/90">Recent sends</h3>
+							</div>
+							<span class="text-xs text-gray-400 dark:text-gray-500">{logs.length} most recent</span>
+						</header>
+						{logs.length === 0 ? (
+							<div class="px-6 py-12 text-center text-sm text-gray-400 dark:text-gray-500">No emails sent yet.</div>
+						) : (
+							<div class="overflow-x-auto nice-scroll">
+								<table class="w-full text-sm">
+									<thead class="text-xs font-semibold uppercase text-gray-500 bg-gray-50 border-b border-gray-200 dark:bg-white/[0.02] dark:border-gray-800 dark:text-gray-400">
+										<tr>
+											<th class="px-5 py-3 text-left">Recipient</th>
+											<th class="px-5 py-3 text-left">Template</th>
+											<th class="px-5 py-3 text-left">Status</th>
+											<th class="px-5 py-3 text-left whitespace-nowrap">Sent</th>
+											<th class="px-5 py-3 text-left whitespace-nowrap">Delivered</th>
+										</tr>
+									</thead>
+									<tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+										{logs.map((l) => (
+											<tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition">
+												<td class="px-5 py-3.5 font-medium text-gray-800 dark:text-white/90">{l.email}</td>
+												<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400">{templateName(l.template_id)}</td>
+												<td class="px-5 py-3.5">
+													<span class={`${PILL} ${logClass(l.status)}`}>{l.status}</span>
+													{l.bounce_reason && <span class="ml-1.5 text-xs text-warning-600">({l.bounce_reason})</span>}
+													{l.error_message && <span class="ml-1.5 text-xs text-error-500" title={l.error_message}>· error</span>}
+												</td>
+												<td class="px-5 py-3.5 text-gray-400 dark:text-gray-500 whitespace-nowrap">{fmtTs(l.sent_at)}</td>
+												<td class="px-5 py-3.5 text-gray-400 dark:text-gray-500 whitespace-nowrap">{fmtTs(l.delivered_at)}</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						)}
+					</section>
+				)}
+
+				{/* ---- Suppression list ---- */}
+				{!loadError && suppressed.length > 0 && (
+					<section id="suppressed" class="bg-white rounded-2xl border border-gray-200 shadow-theme-xs scroll-mt-24 dark:bg-white/[0.03] dark:border-gray-800">
+						<header class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center gap-2.5">
+							<span class="grid h-9 w-9 place-items-center rounded-lg bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500">
+								<span class="material-symbols-outlined">block</span>
+							</span>
+							<h3 class="font-semibold text-gray-800 dark:text-white/90">Suppressed addresses
+								<span class="ml-1 text-xs font-medium text-gray-400 dark:text-gray-500">({suppressed.length})</span>
+							</h3>
+						</header>
+						<div class="overflow-x-auto nice-scroll">
+							<table class="w-full text-sm">
+								<tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+									{suppressed.map((s) => (
+										<tr class="hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition">
+											<td class="px-5 py-3.5 font-medium text-gray-700 dark:text-gray-300">{s.email}</td>
+											<td class="px-5 py-3.5"><span class={`${PILL} bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-400`}>{s.reason}</span></td>
+											<td class="px-5 py-3.5 text-gray-400 dark:text-gray-500 whitespace-nowrap text-right">{fmtTs(s.added_at)}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					</section>
+				)}
+
+				<p class="text-center text-xs text-gray-400 dark:text-gray-500 pb-4">CureVà Beauty Lounge · Notifications service · All times Mountain Time (Utah)</p>
+			</main>
+		</div>
 
 		{/* ---- Template editor modal ---- */}
-		<div id="tpl-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto">
-			<div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl">
-				<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-					<h3 id="tpl-modal-title" class="text-sm font-bold text-slate-900">New template</h3>
-					<button type="button" onclick="closeTemplateEditor()" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+		<div id="tpl-modal" class="hidden fixed inset-0 z-[60] bg-gray-900/50 p-4 sm:p-6 overflow-y-auto fade-in backdrop-blur-sm">
+			<div class="max-w-6xl mx-auto my-4 bg-white rounded-2xl border border-gray-200 shadow-theme-lg flex flex-col max-h-[92vh] pop-in dark:bg-gray-900 dark:border-gray-800">
+				<div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between shrink-0">
+					<h3 id="tpl-modal-title" class="font-semibold text-gray-800 dark:text-white/90">New template</h3>
+					<button type="button" onclick="closeTemplateEditor()" class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition">
 						<span class="material-symbols-outlined text-base">close</span>
 					</button>
 				</div>
-				<div class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+				<div class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 min-h-0 overflow-y-auto nice-scroll">
 					<div class="space-y-4">
 						<input type="hidden" id="tpl-id" />
 						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Name</label>
+							<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
 							<input id="tpl-name" type="text" placeholder="e.g. Spring promo" oninput="updateEditorPreview()"
-								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+								class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" />
 						</div>
 						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Subject</label>
+							<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Subject</label>
 							<input id="tpl-subject" type="text" placeholder="Subject line" oninput="updateEditorPreview()"
-								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+								class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" />
 						</div>
 						<div>
-							<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">HTML body</label>
-							<textarea id="tpl-html" rows="14" oninput="updateEditorPreview()" spellcheck="false"
-								class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-mono leading-relaxed focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"></textarea>
-							<p class="text-xs text-slate-400 mt-1">
-								Use <code class="px-1 rounded bg-slate-100">{"{{name}}"}</code>,
-								<code class="px-1 rounded bg-slate-100">{"{{discount_code}}"}</code>,
-								<code class="px-1 rounded bg-slate-100">{"{{unsubscribe_url}}"}</code>. Variables are detected automatically.
+							<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">HTML body</label>
+							<textarea id="tpl-html" rows="20" oninput="updateEditorPreview()" spellcheck="false"
+								class="form-textarea w-full h-[clamp(320px,58vh,640px)] resize-y rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-mono leading-relaxed text-gray-800 shadow-theme-xs focus:bg-white focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:bg-gray-950 nice-scroll"></textarea>
+							<p class="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+								Use <code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.06] text-brand-500 font-medium">{"{{name}}"}</code>
+								<code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.06] text-brand-500 font-medium">{"{{discount_code}}"}</code>
+								<code class="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.06] text-brand-500 font-medium">{"{{unsubscribe_url}}"}</code> — variables are detected automatically.
 							</p>
 						</div>
-						<div id="tpl-error" class="hidden rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200"></div>
+						<div id="tpl-error" class="hidden rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400"></div>
 					</div>
-					<div class="space-y-2">
-						<div class="text-xs text-slate-500">Preview subject: <span id="tpl-preview-subject" class="font-medium text-slate-800"></span></div>
-						<iframe id="tpl-preview-frame" title="Template preview" class="w-full h-[420px] rounded-xl border border-slate-200 bg-white"></iframe>
-						<p class="text-xs text-slate-400">Preview uses sample values (<code>name → Ava</code>).</p>
+					<div class="space-y-2 flex flex-col min-h-0">
+						<div class="text-xs text-gray-500 dark:text-gray-400 shrink-0">Preview subject: <span id="tpl-preview-subject" class="font-medium text-gray-800 dark:text-white/90"></span></div>
+						<iframe id="tpl-preview-frame" title="Template preview" class="w-full flex-1 min-h-[clamp(320px,56vh,620px)] rounded-lg border border-gray-200 bg-white dark:border-gray-800"></iframe>
+						<p class="text-xs text-gray-400 dark:text-gray-500 shrink-0">Preview uses sample values (<code class="px-1 rounded bg-gray-100 dark:bg-white/[0.06]">name → Ava</code>).</p>
 					</div>
 				</div>
-				<div class="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
-					<button type="button" onclick="closeTemplateEditor()" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
-					<button type="button" id="tpl-save-btn" onclick="saveTemplate()" class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-4 py-2 text-sm font-semibold hover:bg-primary-dark transition">
+				<div class="px-5 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2 shrink-0">
+					<button type="button" onclick="closeTemplateEditor()" class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.03] transition">Cancel</button>
+					<button type="button" id="tpl-save-btn" onclick="saveTemplate()" class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition">
 						<span class="material-symbols-outlined text-base">save</span>Save template
 					</button>
 				</div>
@@ -642,41 +919,39 @@ const templatesForClient = templates.map((t) => ({
 		</div>
 
 		{/* ---- Send-test modal ---- */}
-		<div id="test-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm p-4 sm:p-6 overflow-y-auto">
-			<div class="max-w-md mx-auto mt-10 bg-white rounded-2xl shadow-xl">
-				<div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-					<h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-						<span class="material-symbols-outlined text-primary text-base">forward_to_inbox</span>Send test email
-					</h3>
-					<button type="button" onclick="closeTestModal()" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+		<div id="test-modal" class="hidden fixed inset-0 z-[60] bg-gray-900/50 p-4 sm:p-6 overflow-y-auto fade-in backdrop-blur-sm">
+			<div class="max-w-md mx-auto mt-14 bg-white rounded-2xl border border-gray-200 shadow-theme-lg pop-in dark:bg-gray-900 dark:border-gray-800">
+				<div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+					<h3 class="font-semibold text-gray-800 dark:text-white/90">Send test email</h3>
+					<button type="button" onclick="closeTestModal()" class="grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition">
 						<span class="material-symbols-outlined text-base">close</span>
 					</button>
 				</div>
 				<div class="p-5 space-y-4">
-					<p class="text-sm text-slate-500">Template: <span id="test-tpl-name" class="font-medium text-slate-800"></span></p>
+					<p class="text-sm text-gray-500 dark:text-gray-400">Template: <span id="test-tpl-name" class="font-medium text-gray-800 dark:text-white/90"></span></p>
 					<input type="hidden" id="test-tpl-id" />
 					<div>
-						<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Send to</label>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Send to</label>
 						<input id="test-to" type="email" placeholder="you@example.com" autocomplete="email"
-							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+							class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" />
 					</div>
 					<div id="test-discount-wrap" class="hidden">
-						<label class="block text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">Discount code (optional)</label>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Discount code <span class="text-xs font-normal text-gray-400 dark:text-gray-500">— optional</span></label>
 						<input id="test-discount" type="text" placeholder="CUREVA15"
-							class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-primary focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20" />
+							class="form-input w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 shadow-theme-xs focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30" />
 					</div>
 					{!sesConfigured && (
-						<div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2.5 text-xs flex items-start gap-2">
-							<span class="material-symbols-outlined text-sm mt-0.5">warning</span>
-							<span>SES isn’t configured, so this Worker can’t send yet. Set the <code class="px-1 rounded bg-amber-100">AWS_*</code> secrets first.</span>
+						<div class="rounded-lg bg-warning-50 border border-warning-200 px-3.5 py-3 text-xs text-warning-800 flex items-start gap-2 dark:bg-warning-500/10 dark:border-warning-500/30 dark:text-warning-400">
+							<span class="material-symbols-outlined text-sm mt-0.5 text-warning-500">warning</span>
+							<span>SES isn't configured, so this Worker can't send yet. Set the <code class="px-1 rounded bg-warning-100 dark:bg-white/[0.06]">AWS_*</code> secrets first.</span>
 						</div>
 					)}
-					<div id="test-result" class="hidden rounded-xl px-4 py-3 text-sm"></div>
+					<div id="test-result" class="hidden rounded-lg px-4 py-3 text-sm"></div>
 				</div>
-				<div class="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
-					<button type="button" onclick="closeTestModal()" class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+				<div class="px-5 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2">
+					<button type="button" onclick="closeTestModal()" class="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.03] transition">Cancel</button>
 					<button type="button" id="test-send-btn" onclick="sendTest()" disabled={!sesConfigured}
-						class="inline-flex items-center gap-1.5 rounded-full bg-primary text-white px-4 py-2 text-sm font-semibold hover:bg-primary-dark transition disabled:opacity-50 disabled:cursor-not-allowed">
+						class="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition disabled:opacity-40 disabled:cursor-not-allowed">
 						<span class="material-symbols-outlined text-base">send</span>Send test email
 					</button>
 				</div>
@@ -685,6 +960,22 @@ const templatesForClient = templates.map((t) => ({
 
 		<script is:inline define:vars={{ templatesForClient, sesConfigured }}>
 			let TEMPLATES = templatesForClient;
+
+			// ---- Theme toggle ----
+			function toggleTheme() {
+				const root = document.documentElement;
+				const isDark = root.classList.toggle("dark");
+				try { localStorage.setItem("theme", isDark ? "dark" : "light"); } catch (_) {}
+			}
+
+			// ---- Mobile sidebar ----
+			function sidebarToggle() {
+				const sb = document.getElementById("sidebar");
+				const ov = document.getElementById("sidebar-overlay");
+				const open = sb.classList.contains("-translate-x-full");
+				sb.classList.toggle("-translate-x-full", !open);
+				ov.classList.toggle("hidden", !open);
+			}
 
 			// Rebuild the template-dependent UI (Compose dropdown, Templates list,
 			// count, Preview) from the in-memory TEMPLATES array — used after an
@@ -710,42 +1001,48 @@ const templatesForClient = templates.map((t) => ({
 				list.innerHTML = "";
 				if (TEMPLATES.length === 0) {
 					const empty = document.createElement("div");
-					empty.className = "px-6 py-12 text-center text-slate-400 text-sm";
+					empty.className = "px-6 py-12 text-center text-sm text-gray-400 dark:text-gray-500";
 					empty.textContent = "No templates yet. Create one to start sending.";
 					list.appendChild(empty);
 				} else {
 					for (const t of TEMPLATES) {
 						const row = document.createElement("div");
-						row.className = "px-5 py-3.5 flex items-center justify-between gap-4";
+						row.className = "px-5 py-4 flex items-center justify-between gap-4 hover:bg-gray-50/70 dark:hover:bg-white/[0.02] transition";
 
 						const info = document.createElement("div");
-						info.className = "min-w-0";
+						info.className = "flex items-center gap-3 min-w-0";
+						const icon = document.createElement("div");
+						icon.className = "grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400";
+						icon.innerHTML = '<span class="material-symbols-outlined text-lg">mail</span>';
+						const txt = document.createElement("div");
+						txt.className = "min-w-0";
 						const nm = document.createElement("p");
-						nm.className = "text-sm font-medium text-slate-800 truncate";
+						nm.className = "text-sm font-medium text-gray-800 dark:text-white/90 truncate";
 						nm.textContent = t.name;
 						const su = document.createElement("p");
-						su.className = "text-xs text-slate-400 truncate";
+						su.className = "text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5";
 						su.textContent = t.subject;
-						info.append(nm, su);
+						txt.append(nm, su);
+						info.append(icon, txt);
 
 						const actions = document.createElement("div");
-						actions.className = "flex items-center gap-1 shrink-0";
+						actions.className = "flex items-center gap-1.5 shrink-0";
 						const testBtn = document.createElement("button");
 						testBtn.type = "button";
 						testBtn.title = "Send a test email to yourself";
-						testBtn.className = "inline-flex items-center gap-1 rounded-full border border-slate-200 pl-2 pr-3 h-8 text-xs font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-700 hover:border-sky-200 transition";
+						testBtn.className = "inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:border-blue-light-300 hover:text-blue-light-700 dark:border-gray-700 dark:text-gray-300 dark:hover:border-blue-light-500/50 dark:hover:text-blue-light-400 transition";
 						testBtn.innerHTML = '<span class="material-symbols-outlined text-sm">forward_to_inbox</span>Send test';
 						testBtn.addEventListener("click", () => openTestModal(t.id, t.name));
 						const editBtn = document.createElement("button");
 						editBtn.type = "button";
 						editBtn.title = "Edit";
-						editBtn.className = "inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition";
+						editBtn.className = "grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06] dark:hover:text-white transition";
 						editBtn.innerHTML = '<span class="material-symbols-outlined text-base">edit</span>';
 						editBtn.addEventListener("click", () => openTemplateEditor(t.id));
 						const delBtn = document.createElement("button");
 						delBtn.type = "button";
 						delBtn.title = "Delete";
-						delBtn.className = "inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition";
+						delBtn.className = "grid h-8 w-8 place-items-center rounded-lg text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition";
 						delBtn.innerHTML = '<span class="material-symbols-outlined text-base">delete</span>';
 						delBtn.addEventListener("click", () => deleteTemplate(t.id, t.name));
 						actions.append(testBtn, editBtn, delBtn);
@@ -798,7 +1095,7 @@ const templatesForClient = templates.map((t) => ({
 				btn.disabled = true;
 				const original = btn.innerHTML;
 				btn.innerHTML = "Sending…";
-				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+				result.className = "hidden rounded-lg px-4 py-3 text-sm";
 
 				try {
 					const body = { template_id: templateId, audience };
@@ -810,14 +1107,14 @@ const templatesForClient = templates.map((t) => ({
 					});
 					const data = await res.json();
 					if (res.ok && data.ok) {
-						result.className = "rounded-xl px-4 py-3 text-sm bg-emerald-50 text-emerald-800 border border-emerald-200";
+						result.className = "rounded-lg px-4 py-3 text-sm bg-success-50 border border-success-200 text-success-700 dark:bg-success-500/10 dark:border-success-500/30 dark:text-success-500";
 						result.textContent = `Sent ${data.sent} of ${data.total}. ${data.failed ? data.failed + " failed/suppressed." : ""}`;
 					} else {
-						result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+						result.className = "rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400";
 						result.textContent = data.error || "Send failed.";
 					}
 				} catch (e) {
-					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.className = "rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400";
 					result.textContent = "Network error. Please try again.";
 				} finally {
 					btn.disabled = false;
@@ -927,7 +1224,7 @@ const templatesForClient = templates.map((t) => ({
 				document.getElementById("test-tpl-name").textContent = name;
 				document.getElementById("test-to").value = "";
 				const result = document.getElementById("test-result");
-				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+				result.className = "hidden rounded-lg px-4 py-3 text-sm";
 				// Show the discount field only for templates that use {{discount_code}}.
 				const usesDiscount = tpl && /\{\{\s*discount_code\s*\}\}/.test(tpl.html + tpl.subject);
 				document.getElementById("test-discount-wrap").classList.toggle("hidden", !usesDiscount);
@@ -947,7 +1244,7 @@ const templatesForClient = templates.map((t) => ({
 				const result = document.getElementById("test-result");
 				const btn = document.getElementById("test-send-btn");
 				if (!to) {
-					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.className = "rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400";
 					result.textContent = "Enter an email address.";
 					return;
 				}
@@ -956,7 +1253,7 @@ const templatesForClient = templates.map((t) => ({
 				btn.disabled = true;
 				const original = btn.innerHTML;
 				btn.innerHTML = "Sending…";
-				result.className = "hidden rounded-xl px-4 py-3 text-sm";
+				result.className = "hidden rounded-lg px-4 py-3 text-sm";
 				try {
 					const res = await fetch("/api/email/test", {
 						method: "POST",
@@ -965,14 +1262,14 @@ const templatesForClient = templates.map((t) => ({
 					});
 					const data = await res.json();
 					if (res.ok && data.ok) {
-						result.className = "rounded-xl px-4 py-3 text-sm bg-emerald-50 text-emerald-800 border border-emerald-200";
+						result.className = "rounded-lg px-4 py-3 text-sm bg-success-50 border border-success-200 text-success-700 dark:bg-success-500/10 dark:border-success-500/30 dark:text-success-500";
 						result.textContent = `Test sent to ${data.to}. Check the inbox (and spam).`;
 					} else {
-						result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+						result.className = "rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400";
 						result.textContent = data.error || "Send failed.";
 					}
 				} catch (e) {
-					result.className = "rounded-xl px-4 py-3 text-sm bg-red-50 text-red-800 border border-red-200";
+					result.className = "rounded-lg px-4 py-3 text-sm bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400";
 					result.textContent = "Network error. Please try again.";
 				}
 				btn.disabled = false;
@@ -984,13 +1281,18 @@ const templatesForClient = templates.map((t) => ({
 
 			function setWhen(mode) {
 				_when = mode;
-				const active = "rounded-xl border px-3 py-2 text-sm font-medium transition border-primary bg-primary/10 text-primary";
-				const idle = "rounded-xl border px-3 py-2 text-sm font-medium transition border-slate-200 text-slate-600 hover:bg-slate-50";
+				const base = "flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition";
+				const active = base + " bg-white text-gray-800 font-semibold shadow-theme-xs dark:bg-gray-900 dark:text-white/90";
+				const idle = base + " font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white";
 				document.getElementById("when-now").className = mode === "now" ? active : idle;
 				document.getElementById("when-later").className = mode === "later" ? active : idle;
 				document.getElementById("schedule-wrap").classList.toggle("hidden", mode !== "later");
 				document.getElementById("send-btn-label").textContent = mode === "later" ? "Schedule campaign" : "Send campaign";
 				document.getElementById("send-btn-icon").textContent = mode === "later" ? "schedule" : "send";
+				// First switch to Schedule: default to tomorrow 9:00 AM (Utah).
+				if (mode === "later" && !document.getElementById("schedule-at").value) {
+					dtpPreset("tomorrow9", true);
+				}
 			}
 
 			// Interpret a datetime-local string ("YYYY-MM-DDTHH:mm") as a wall-clock
@@ -1018,7 +1320,7 @@ const templatesForClient = templates.map((t) => ({
 				const echo = document.getElementById("schedule-echo");
 				const epoch = denverEpochFromWall(v);
 				if (!v || isNaN(epoch)) {
-					echo.className = "text-xs text-slate-400 mt-1";
+					echo.className = "text-xs text-gray-400 dark:text-gray-500 mt-1.5";
 					echo.textContent = "Sends automatically at this Mountain Time (checked every ~5 min).";
 					return;
 				}
@@ -1027,19 +1329,199 @@ const templatesForClient = templates.map((t) => ({
 					timeZone: "America/Denver",
 				});
 				if (epoch <= Date.now()) {
-					echo.className = "text-xs text-red-500 mt-1";
+					echo.className = "text-xs text-error-500 mt-1.5";
 					echo.textContent = "That time is in the past — pick a future time.";
 				} else {
-					echo.className = "text-xs text-slate-500 mt-1";
+					echo.className = "text-xs text-gray-500 dark:text-gray-400 mt-1.5";
 					echo.textContent = "Sends " + when + " MT — automatically (checked every ~5 min).";
 				}
 			}
 
+			// ---- Modern date & time picker (all values are Utah wall-clock) ----
+			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+			const DAYS_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+			const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+			/** Current wall-clock date/time in America/Denver. */
+			function denverNowParts() {
+				const fmt = new Intl.DateTimeFormat("en-US", {
+					timeZone: "America/Denver", year: "numeric", month: "2-digit", day: "2-digit",
+					hour: "2-digit", minute: "2-digit", hour12: false,
+				});
+				const p = {};
+				for (const part of fmt.formatToParts(new Date())) p[part.type] = part.value;
+				return { y: +p.year, m: +p.month - 1, d: +p.day, h: +p.hour % 24, min: +p.minute };
+			}
+
+			const _now0 = denverNowParts();
+			const dtp = {
+				open: false,
+				viewY: _now0.y, viewM: _now0.m,          // month being displayed
+				selY: null, selM: null, selD: null,       // selected day
+				hour12: 9, minute: 0, ampm: "AM",         // selected time
+			};
+
+			function dtpInitTimeSelects() {
+				const hourSel = document.getElementById("dtp-hour");
+				const minSel = document.getElementById("dtp-min");
+				if (!hourSel || hourSel.options.length) return;
+				for (let h = 1; h <= 12; h++) {
+					const o = document.createElement("option");
+					o.value = String(h); o.textContent = String(h);
+					hourSel.appendChild(o);
+				}
+				for (let m = 0; m < 60; m += 5) {
+					const o = document.createElement("option");
+					o.value = String(m); o.textContent = String(m).padStart(2, "0");
+					minSel.appendChild(o);
+				}
+				hourSel.value = String(dtp.hour12);
+				minSel.value = String(dtp.minute);
+				hourSel.addEventListener("change", () => { dtp.hour12 = +hourSel.value; dtpSync(); });
+				minSel.addEventListener("change", () => { dtp.minute = +minSel.value; dtpSync(); });
+			}
+
+			function dtpToggle() {
+				const pop = document.getElementById("dtp");
+				dtp.open = !dtp.open;
+				pop.classList.toggle("hidden", !dtp.open);
+				if (dtp.open) {
+					dtpInitTimeSelects();
+					if (dtp.selY != null) { dtp.viewY = dtp.selY; dtp.viewM = dtp.selM; }
+					dtpRender();
+				}
+			}
+
+			function dtpPrev() { dtp.viewM--; if (dtp.viewM < 0) { dtp.viewM = 11; dtp.viewY--; } dtpRender(); }
+			function dtpNext() { dtp.viewM++; if (dtp.viewM > 11) { dtp.viewM = 0; dtp.viewY++; } dtpRender(); }
+
+			function dtpSetAmPm(p) {
+				dtp.ampm = p;
+				const am = document.getElementById("dtp-am");
+				const pm = document.getElementById("dtp-pm");
+				const on = "rounded-md px-2.5 py-1 text-xs font-semibold bg-brand-500 text-white transition";
+				const off = "rounded-md px-2.5 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 transition";
+				am.className = p === "AM" ? on : off;
+				pm.className = p === "PM" ? on : off;
+				dtpSync();
+			}
+
+			function dtpRender() {
+				document.getElementById("dtp-month-label").textContent = MONTHS[dtp.viewM] + " " + dtp.viewY;
+				const grid = document.getElementById("dtp-days");
+				grid.innerHTML = "";
+				const today = denverNowParts();
+				const firstDow = new Date(Date.UTC(dtp.viewY, dtp.viewM, 1)).getUTCDay();
+				const daysInMonth = new Date(Date.UTC(dtp.viewY, dtp.viewM + 1, 0)).getUTCDate();
+				for (let i = 0; i < firstDow; i++) grid.appendChild(document.createElement("span"));
+				for (let d = 1; d <= daysInMonth; d++) {
+					const btn = document.createElement("button");
+					btn.type = "button";
+					btn.textContent = String(d);
+					const isPast =
+						dtp.viewY < today.y ||
+						(dtp.viewY === today.y && dtp.viewM < today.m) ||
+						(dtp.viewY === today.y && dtp.viewM === today.m && d < today.d);
+					const isToday = dtp.viewY === today.y && dtp.viewM === today.m && d === today.d;
+					const isSel = dtp.selY === dtp.viewY && dtp.selM === dtp.viewM && dtp.selD === d;
+					let cls = "h-9 w-full rounded-lg text-sm transition ";
+					if (isPast) cls += "text-gray-300 dark:text-gray-700 cursor-not-allowed";
+					else if (isSel) cls += "bg-brand-500 text-white font-semibold";
+					else if (isToday) cls += "text-brand-500 font-semibold border border-brand-300 hover:bg-gray-100 dark:hover:bg-white/[0.06]";
+					else cls += "text-gray-600 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-white/[0.06]";
+					btn.className = cls;
+					if (!isPast) {
+						btn.addEventListener("click", () => {
+							dtp.selY = dtp.viewY; dtp.selM = dtp.viewM; dtp.selD = d;
+							dtpRender(); dtpSync();
+						});
+					} else {
+						btn.disabled = true;
+					}
+					grid.appendChild(btn);
+				}
+			}
+
+			function dtpPreset(kind, silent) {
+				const now = denverNowParts();
+				let y = now.y, m = now.m, d = now.d, h12 = 9, mi = 0, ap = "AM";
+				if (kind === "plus1h") {
+					// One hour from now (Utah), minutes rounded up to :05.
+					let h = now.h + 1, day = now.d;
+					mi = Math.ceil(now.min / 5) * 5;
+					if (mi >= 60) { mi = 0; h++; }
+					if (h >= 24) { h -= 24; day++; }
+					const dim = new Date(Date.UTC(now.y, now.m + 1, 0)).getUTCDate();
+					if (day > dim) { day = 1; m = now.m + 1; if (m > 11) { m = 0; y++; } }
+					d = day;
+					ap = h >= 12 ? "PM" : "AM";
+					h12 = h % 12 === 0 ? 12 : h % 12;
+				} else if (kind === "tomorrow9") {
+					const dim = new Date(Date.UTC(now.y, now.m + 1, 0)).getUTCDate();
+					d = now.d + 1;
+					if (d > dim) { d = 1; m = now.m + 1; if (m > 11) { m = 0; y++; } }
+				} else if (kind === "monday9") {
+					const dow = new Date(Date.UTC(now.y, now.m, now.d)).getUTCDay();
+					let add = (8 - dow) % 7; if (add === 0) add = 7;
+					const t = new Date(Date.UTC(now.y, now.m, now.d + add));
+					y = t.getUTCFullYear(); m = t.getUTCMonth(); d = t.getUTCDate();
+				}
+				dtp.selY = y; dtp.selM = m; dtp.selD = d;
+				dtp.viewY = y; dtp.viewM = m;
+				dtp.hour12 = h12; dtp.minute = mi; dtp.ampm = ap;
+				dtpInitTimeSelects();
+				const hourSel = document.getElementById("dtp-hour");
+				const minSel = document.getElementById("dtp-min");
+				if (hourSel) hourSel.value = String(h12);
+				if (minSel) minSel.value = String(mi);
+				dtpSetAmPm(ap);
+				if (dtp.open) dtpRender();
+				if (!silent && !dtp.open) dtpToggle();
+				dtpSync();
+			}
+
+			function dtpClear() {
+				dtp.selY = dtp.selM = dtp.selD = null;
+				document.getElementById("schedule-at").value = "";
+				const label = document.getElementById("dtp-label");
+				label.textContent = "Pick a date & time…";
+				label.className = "truncate text-gray-400 dark:text-gray-500";
+				if (dtp.open) dtpRender();
+				updateScheduleEcho();
+			}
+
+			/** Write the selection to the hidden input + trigger label + echo. */
+			function dtpSync() {
+				if (dtp.selY == null) return;
+				let h = dtp.hour12 % 12;
+				if (dtp.ampm === "PM") h += 12;
+				const val = dtp.selY + "-" + String(dtp.selM + 1).padStart(2, "0") + "-" +
+					String(dtp.selD).padStart(2, "0") + "T" + String(h).padStart(2, "0") + ":" +
+					String(dtp.minute).padStart(2, "0");
+				document.getElementById("schedule-at").value = val;
+				const dow = DAYS_SHORT[new Date(Date.UTC(dtp.selY, dtp.selM, dtp.selD)).getUTCDay()];
+				const label = document.getElementById("dtp-label");
+				label.textContent = dow + ", " + MONTHS_SHORT[dtp.selM] + " " + dtp.selD + ", " + dtp.selY +
+					" · " + dtp.hour12 + ":" + String(dtp.minute).padStart(2, "0") + " " + dtp.ampm + " MT";
+				label.className = "truncate font-medium text-gray-800 dark:text-white/90";
+				updateScheduleEcho();
+			}
+
+			// Close the picker when clicking outside it.
+			document.addEventListener("click", (e) => {
+				if (!dtp.open) return;
+				const root = document.getElementById("dtp-root");
+				if (root && !root.contains(e.target)) {
+					dtp.open = false;
+					document.getElementById("dtp").classList.add("hidden");
+				}
+			});
+
 			function showSendResult(ok, msg) {
 				const result = document.getElementById("send-result");
-				result.className = "rounded-xl px-4 py-3 text-sm " +
-					(ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-						: "bg-red-50 text-red-800 border border-red-200");
+				result.className = "rounded-lg px-4 py-3 text-sm " +
+					(ok ? "bg-success-50 border border-success-200 text-success-700 dark:bg-success-500/10 dark:border-success-500/30 dark:text-success-500"
+						: "bg-error-50 border border-error-200 text-error-700 dark:bg-error-500/10 dark:border-error-500/30 dark:text-error-400");
 				result.textContent = msg;
 			}
 
@@ -1112,6 +1594,14 @@ const templatesForClient = templates.map((t) => ({
 				scheduleCampaign,
 				cancelCampaign,
 				updateScheduleEcho,
+				dtpToggle,
+				dtpPrev,
+				dtpNext,
+				dtpSetAmPm,
+				dtpPreset,
+				dtpClear,
+				sidebarToggle,
+				toggleTheme,
 			});
 
 			// ---- Drag-to-resize divider between Compose and Preview ----
