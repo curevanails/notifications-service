@@ -1,0 +1,125 @@
+---
+import { env } from "cloudflare:workers";
+import { listRecruitNotifications } from "../utils/recruit-notifications";
+import { RECRUIT_NOTIFY_TO, getSetting, parseRecipients } from "../utils/app-settings";
+
+// Server-rendered, auth-gated by src/middleware.ts (path listed as protected).
+export const prerender = false;
+
+const db = env.DB as D1Database;
+const rows = await listRecruitNotifications(db, 200);
+const recipients = parseRecipients(await getSetting(db, RECRUIT_NOTIFY_TO));
+
+const utc = new Intl.DateTimeFormat("en-US", {
+	timeZone: "America/Denver",
+	month: "short",
+	day: "numeric",
+	hour: "numeric",
+	minute: "2-digit",
+});
+const fmt = (ms: number) => utc.format(new Date(ms));
+
+const badge: Record<string, string> = {
+	sent: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
+	failed: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
+	skipped: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+};
+---
+
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
+		<meta name="robots" content="noindex, nofollow" />
+		<title>Recruit alerts · CureVà Notify</title>
+		<script is:inline>
+			(function () {
+				try {
+					const saved = localStorage.getItem("theme");
+					const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+					if (saved === "dark" || (!saved && sysDark)) document.documentElement.classList.add("dark");
+				} catch (_) {}
+			})();
+		</script>
+		<script is:inline src="https://cdn.tailwindcss.com?plugins=forms"></script>
+		<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+		<script is:inline id="tailwind-config">
+			tailwind.config = {
+				darkMode: "class",
+				theme: {
+					extend: {
+						fontFamily: { sans: ["Outfit", "system-ui", "sans-serif"] },
+						colors: {
+							brand: { 50: "#ECF3FF", 100: "#DDE9FF", 300: "#9CB9FF", 500: "#465FFF", 600: "#3641F5" },
+							curva: { DEFAULT: "#3a656e", dark: "#2f545c" },
+						},
+					},
+				},
+			};
+		</script>
+	</head>
+	<body class="min-h-screen bg-gray-50 font-sans text-gray-800 antialiased dark:bg-gray-950 dark:text-gray-200">
+		<main class="mx-auto max-w-4xl px-4 py-10 sm:py-14">
+			<a href="/" class="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-brand-500">
+				← Back to dashboard
+			</a>
+
+			<div class="mt-5 flex flex-wrap items-end justify-between gap-3">
+				<div>
+					<h1 class="text-2xl font-semibold text-gray-900 dark:text-white sm:text-3xl">Recruit alerts</h1>
+					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+						Emails sent when a candidate submits the application form. Times in Mountain Time.
+					</p>
+				</div>
+				<a href="/settings" class="text-sm font-medium text-brand-500 hover:text-brand-600">Settings →</a>
+			</div>
+
+			<div class="mt-4 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+				{recipients.length === 0 ? (
+					<span>⚠️ No recipients configured — alerts are <strong>off</strong>. Add an address in <a href="/settings" class="text-brand-500 hover:underline">Settings</a>.</span>
+				) : (
+					<span>Currently notifying: <strong>{recipients.join(", ")}</strong></span>
+				)}
+			</div>
+
+			<section class="mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
+				{rows.length === 0 ? (
+					<div class="px-6 py-16 text-center text-sm text-gray-500 dark:text-gray-400">
+						No alerts yet. They'll appear here as candidates apply.
+					</div>
+				) : (
+					<div class="overflow-x-auto">
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400 dark:border-gray-800">
+									<th class="px-5 py-3 font-medium">Candidate</th>
+									<th class="px-5 py-3 font-medium">When</th>
+									<th class="px-5 py-3 font-medium">Sent to</th>
+									<th class="px-5 py-3 font-medium">Status</th>
+								</tr>
+							</thead>
+							<tbody>
+								{rows.map((r) => (
+									<tr class="border-b border-gray-50 last:border-0 dark:border-gray-800/60">
+										<td class="px-5 py-3.5 font-medium text-gray-900 dark:text-white/90">{r.candidate_name}</td>
+										<td class="px-5 py-3.5 whitespace-nowrap text-gray-500 dark:text-gray-400">{fmt(r.created_at)}</td>
+										<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400">{r.recipients ?? "—"}</td>
+										<td class="px-5 py-3.5">
+											<span class={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badge[r.status] ?? "bg-gray-100 text-gray-600"}`}>
+												{r.status}
+											</span>
+											{r.error && (
+												<span class="mt-1 block max-w-xs truncate text-xs text-gray-400" title={r.error}>{r.error}</span>
+											)}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)}
+			</section>
+		</main>
+	</body>
+</html>

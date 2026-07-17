@@ -29,7 +29,13 @@ function workerVar(name: string): string | undefined {
 
 /** Paths that require a valid session: the dashboard and its action endpoints. */
 function isProtected(path: string): boolean {
-	return path === "/" || path.startsWith("/api/email/");
+	return (
+		path === "/" ||
+		path === "/settings" ||
+		path === "/recruit-alerts" ||
+		path.startsWith("/api/email/") ||
+		path.startsWith("/api/settings")
+	);
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
