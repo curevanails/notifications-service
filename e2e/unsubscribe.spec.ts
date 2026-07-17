@@ -32,3 +32,14 @@ test("the unsubscribe route is reachable without a session cookie", async ({ req
 	const res = await request.get("/unsubscribe/some-token", { maxRedirects: 0 });
 	expect(res.status()).toBe(200);
 });
+
+test("accepts the RFC 8058 one-click POST (not CSRF-blocked, not 405)", async ({ request }) => {
+	// Gmail/Yahoo POST here with this exact body and no cookies/Origin. It must
+	// reach the handler (200), never a 403 CSRF block or a 405. A bogus token
+	// renders the invalid state but still returns 200 — that's the contract.
+	const res = await request.post("/unsubscribe/one-click-probe-token", {
+		form: { "List-Unsubscribe": "One-Click" },
+		maxRedirects: 0,
+	});
+	expect(res.status()).toBe(200);
+});
