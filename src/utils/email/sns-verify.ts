@@ -28,7 +28,14 @@ export interface SnsMessage {
 
 const certCache = new Map<string, CryptoKey>();
 
-function isValidCertUrl(url: string): boolean {
+/**
+ * True when `url` is an https URL on a genuine AWS SNS host
+ * (`sns.<region>.amazonaws.com`). Used to validate both the signing-cert URL
+ * and the one-time `SubscribeURL` we auto-confirm — never fetch a URL from an
+ * SNS payload without passing it through this first.
+ */
+export function isValidSnsUrl(url: string | undefined): url is string {
+	if (!url) return false;
 	let u: URL;
 	try {
 		u = new URL(url);
@@ -36,10 +43,12 @@ function isValidCertUrl(url: string): boolean {
 		return false;
 	}
 	return (
-		u.protocol === "https:" &&
-		/^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(u.hostname) &&
-		u.pathname.endsWith(".pem")
+		u.protocol === "https:" && /^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(u.hostname)
 	);
+}
+
+function isValidCertUrl(url: string): boolean {
+	return isValidSnsUrl(url) && new URL(url).pathname.endsWith(".pem");
 }
 
 /** The field set + order SNS uses to build the string-to-sign. */

@@ -2,7 +2,11 @@ import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { ensureEmailSchema } from "../../../utils/email-db";
 import { addSuppression } from "../../../utils/email/suppression";
-import { verifySnsMessage, type SnsMessage } from "../../../utils/email/sns-verify";
+import {
+	isValidSnsUrl,
+	verifySnsMessage,
+	type SnsMessage,
+} from "../../../utils/email/sns-verify";
 
 // Public endpoint (not auth-gated) — SNS posts here. Never prerender.
 export const prerender = false;
@@ -40,8 +44,31 @@ export const POST: APIRoute = async ({ request }) => {
 		return new Response("Invalid signature", { status: 403 });
 	}
 
+	// A valid signature only proves *some* AWS SNS topic signed the message, not
+	// that it is OUR topic. Without this check an attacker could point their own
+	// SNS topic at this public endpoint and publish forged SES events. When
+	// `SES_TOPIC_ARN` is configured, require an exact match.
+	const expectedTopic = (
+		env as unknown as Record<string, string | undefined>
+	).SES_TOPIC_ARN?.trim();
+	if (expectedTopic && sns.TopicArn !== expectedTopic) {
+		return new Response("Untrusted topic", { status: 403 });
+	}
+
 	// Auto-confirm the subscription by visiting the one-time SubscribeURL.
-	if (sns.Type === "SubscriptionConfirmation" && sns.SubscribeURL) {
+	// Only do this for our own topic — otherwise confirming an attacker-owned
+	// subscription would wire this webhook up to their topic. If `SES_TOPIC_ARN`
+	// is unset we can't tell whose topic this is, so we refuse to auto-confirm.
+	if (sns.Type === "SubscriptionConfirmation") {
+		if (!expectedTopic) {
+			console.warn(
+				"SNS SubscriptionConfirmation ignored: set SES_TOPIC_ARN to enable auto-confirm",
+			);
+			return new Response("OK");
+		}
+		if (!isValidSnsUrl(sns.SubscribeURL)) {
+			return new Response("Bad SubscribeURL", { status: 400 });
+		}
 		await fetch(sns.SubscribeURL);
 		return new Response("OK");
 	}

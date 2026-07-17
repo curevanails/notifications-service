@@ -41,7 +41,15 @@ test.describe("gate — protected surfaces", () => {
 		});
 	}
 
-	for (const path of ["/settings", "/recruit-alerts"]) {
+	// Includes the trailing-slash variants: Astro's default `trailingSlash:
+	// "ignore"` serves `/settings/` from the `/settings` route, so the gate must
+	// match both forms or it can be bypassed (regression guard).
+	for (const path of [
+		"/settings",
+		"/settings/",
+		"/recruit-alerts",
+		"/recruit-alerts/",
+	]) {
 		test(`unauthenticated ${path} redirects to the login form`, async ({ request }) => {
 			const res = await request.get(path, { maxRedirects: 0 });
 			expect(res.status()).toBe(302);

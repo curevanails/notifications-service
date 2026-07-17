@@ -4,9 +4,11 @@ import {
 	SESSION_COOKIE,
 	SESSION_TTL_MS,
 	createSessionToken,
+	resolveSessionSecret,
 	verifyCredentials,
 	verifySessionToken,
 } from "../utils/admin-auth";
+import { isRateLimited, recordAttempt } from "../utils/rate-limit";
 
 export const prerender = false;
 
@@ -25,32 +27,46 @@ if (!password) {
 }
 const username = workerVar("ADMIN_USERNAME") || "admin";
 const secure = Astro.url.protocol === "https:";
+const signingSecret = resolveSessionSecret(password, workerVar("SESSION_SECRET"));
 
 // Already signed in? Skip the form.
 const existing = Astro.cookies.get(SESSION_COOKIE)?.value;
-if (await verifySessionToken(existing, password)) {
+if (await verifySessionToken(existing, signingSecret)) {
 	return Astro.redirect("/", 302);
 }
 
 let error = false;
+let rateLimited = false;
 
 if (Astro.request.method === "POST") {
-	const form = await Astro.request.formData();
-	const user = String(form.get("username") ?? "").trim();
-	const pass = String(form.get("password") ?? "");
+	// Throttle brute-force attempts: block once 10 FAILED logins accrue for this
+	// IP in 10 min. Only failures count, so a legitimate admin is never locked
+	// out by their own successful sign-ins.
+	const ip = Astro.request.headers.get("CF-Connecting-IP") ?? "unknown";
+	const kv = (env as unknown as { SESSION?: KVNamespace }).SESSION;
+	const key = `login:${ip}`;
 
-	if (verifyCredentials(user, pass, username, password)) {
-		const token = await createSessionToken(password);
-		Astro.cookies.set(SESSION_COOKIE, token, {
-			httpOnly: true,
-			secure,
-			sameSite: "lax",
-			path: "/",
-			maxAge: Math.floor(SESSION_TTL_MS / 1000),
-		});
-		return Astro.redirect("/", 302);
+	if (await isRateLimited(kv, key, 10)) {
+		rateLimited = true;
+	} else {
+		const form = await Astro.request.formData();
+		const user = String(form.get("username") ?? "").trim();
+		const pass = String(form.get("password") ?? "");
+
+		if (verifyCredentials(user, pass, username, password)) {
+			const token = await createSessionToken(signingSecret);
+			Astro.cookies.set(SESSION_COOKIE, token, {
+				httpOnly: true,
+				secure,
+				sameSite: "lax",
+				path: "/",
+				maxAge: Math.floor(SESSION_TTL_MS / 1000),
+			});
+			return Astro.redirect("/", 302);
+		}
+		await recordAttempt(kv, key, 600);
+		error = true;
 	}
-	error = true;
 }
 ---
 
@@ -141,10 +157,10 @@ if (Astro.request.method === "POST") {
 						</div>
 
 						<form method="POST" class="space-y-5" novalidate>
-							{error && (
+							{(error || rateLimited) && (
 								<div class="flex items-start gap-2.5 rounded-lg bg-error-50 border border-error-200 text-error-700 px-4 py-3 text-sm dark:bg-error-500/10 dark:border-error-500/20 dark:text-error-400" style="background-color: rgb(254 242 242); border-color: rgb(254 202 202); color: rgb(185 28 28);">
 									<span class="material-symbols-outlined text-base">error</span>
-									<span>Incorrect username or password.</span>
+									<span>{rateLimited ? "Too many attempts. Please wait a few minutes and try again." : "Incorrect username or password."}</span>
 								</div>
 							)}
 

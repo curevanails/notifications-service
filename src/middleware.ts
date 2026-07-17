@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { defineMiddleware } from "astro:middleware";
-import { SESSION_COOKIE, verifySessionToken } from "./utils/admin-auth";
+import { SESSION_COOKIE, resolveSessionSecret, verifySessionToken } from "./utils/admin-auth";
 
 /**
  * Auth gate for the dashboard.
@@ -39,7 +39,13 @@ function isProtected(path: string): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
-	const path = context.url.pathname;
+	// Normalize the path before matching. Astro's default `trailingSlash: "ignore"`
+	// serves `/settings/` and `/recruit-alerts/` from the same routes as their
+	// un-slashed forms, but the exact-equality checks in `isProtected` would miss
+	// the trailing-slash variants — letting an attacker reach the dashboard's
+	// PII pages and settings POST unauthenticated. Strip any trailing slash(es)
+	// (collapsing the root back to "/") so the gate can't be bypassed that way.
+	const path = context.url.pathname.replace(/\/+$/, "") || "/";
 
 	// Everything not explicitly protected (login, logout, unsubscribe, the SNS
 	// webhook, static assets, 404s) passes straight through.
@@ -51,8 +57,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
 		return new Response("Not found", { status: 404 });
 	}
 
+	// Sign/verify session tokens with a dedicated secret when one is configured,
+	// falling back to ADMIN_PASSWORD for backward compatibility. Keeping the
+	// signing key separate from the login password means a leaked cookie can't be
+	// used to brute-force the password offline. See src/utils/admin-auth.ts.
+	const signingSecret = resolveSessionSecret(password, workerVar("SESSION_SECRET"));
+
 	const token = context.cookies.get(SESSION_COOKIE)?.value;
-	if (!(await verifySessionToken(token, password))) {
+	if (!(await verifySessionToken(token, signingSecret))) {
 		return context.redirect("/login", 302);
 	}
 
