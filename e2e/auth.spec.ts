@@ -40,6 +40,14 @@ test.describe("gate — protected surfaces", () => {
 			expect(res.headers().location).toBe("/login");
 		});
 	}
+
+	for (const path of ["/settings", "/recruit-alerts"]) {
+		test(`unauthenticated ${path} redirects to the login form`, async ({ request }) => {
+			const res = await request.get(path, { maxRedirects: 0 });
+			expect(res.status()).toBe(302);
+			expect(res.headers().location).toBe("/login");
+		});
+	}
 });
 
 test.describe("gate — public surfaces stay reachable", () => {
