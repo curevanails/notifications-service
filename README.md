@@ -42,8 +42,27 @@ pnpm install
 pnpm dev         # astro dev
 pnpm build       # astro build (compiles the Worker)
 pnpm typecheck   # astro check
+pnpm test:e2e    # build + preview the Worker, run the Playwright E2E suite
 pnpm deploy      # build && wrangler deploy
+pnpm ship        # typecheck && test:e2e && deploy  (gated local deploy)
 ```
+
+## Testing & CI
+
+End-to-end tests (Playwright, against the built Worker under Miniflare) cover
+the auth gate, template CRUD, the send-path **safety invariant** (no test can
+trigger a real AWS SES send), the SNS webhook, and the public unsubscribe page.
+CI (`.github/workflows/ci.yml`) runs them on every push/PR and **deploys to
+Cloudflare only after they pass** (pushes to `main`). Full guide:
+[`docs/TESTING.md`](docs/TESTING.md).
+
+> **Note — CSRF is intentionally disabled** (`astro.config.mjs`,
+> `security.checkOrigin: false`). AWS SNS posts to `/api/webhooks/ses` as
+> `text/plain` with no `Origin` header, which Astro's default CSRF check would
+> reject with a 403 before the handler runs — silently dropping every SES
+> delivery/bounce/complaint event. Protection now comes from the signed-cookie
+> auth gate, the SNS signature verification, and the unsubscribe token — all
+> stronger than origin reflection for a Worker that serves APIs and webhooks.
 
 ## Configuration
 
