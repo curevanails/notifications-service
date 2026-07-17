@@ -34,5 +34,17 @@
 	// SES credentials are SECRETS, not vars — set with `wrangler secret put`.
 	// See docs/EMAIL.md:
 	//   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, PUBLIC_SITE_URL
-	// Admin auth secret (see README): ADMIN_PASSWORD (required), ADMIN_USERNAME.
+	// Admin auth secrets (see README):
+	//   ADMIN_PASSWORD  (required)
+	//   ADMIN_USERNAME  (optional, default "admin")
+	//   SESSION_SECRET  (recommended — dedicated key for signing session cookies,
+	//                    kept separate from ADMIN_PASSWORD; falls back to
+	//                    ADMIN_PASSWORD when unset)
+	"vars": {
+		// The ARN of the SNS topic your SES Configuration Set publishes to. The
+		// /api/webhooks/ses handler rejects any SNS message from a different topic
+		// and refuses to auto-confirm foreign subscriptions. Leave empty to
+		// disable the check (NOT recommended — set this in production).
+		"SES_TOPIC_ARN": "",
+	},
 }
