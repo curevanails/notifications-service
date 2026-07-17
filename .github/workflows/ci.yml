@@ -1,0 +1,93 @@
+name: CI
+
+# Build + typecheck + E2E on every push and PR. Deploy to Cloudflare ONLY after
+# the E2E job passes, and only for pushes to `main`.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same ref cancels an in-flight run (but let deploys finish).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Typecheck & E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      # Enables the auth-gated dashboard/API so those specs run instead of
+      # skipping. Ephemeral to the CI Worker; NOT a production secret. The
+      # preview Worker reads this from .dev.vars; the test helper reads the env.
+      ADMIN_PASSWORD: ci-test-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Provide admin password to the preview Worker
+        run: printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD" > .dev.vars
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Builds the Worker and runs it under Miniflare, then runs every spec.
+      # No AWS SES secrets are provided, so no test can dispatch a real email.
+      - name: E2E
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: [e2e] # gate: only runs if the E2E job succeeded
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Optional: attach a GitHub Environment for deploy protection / secrets.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the Worker
+        run: pnpm build
+
+      # Deploys with the repo's pinned wrangler. Worker secrets (ADMIN_PASSWORD,
+      # AWS_*, etc.) are set once with `wrangler secret put` and persist across
+      # deploys — they are NOT part of this pipeline.
+      - name: Deploy
+        run: pnpm exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

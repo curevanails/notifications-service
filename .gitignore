@@ -11,3 +11,9 @@ dist
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# Playwright E2E
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
