@@ -98,6 +98,20 @@ no auth). Confirming sets `email_status='unsubscribed'` and adds the address to
 the suppression list, so it's excluded from future audiences and blocked at
 send time.
 
+**One-click unsubscribe (RFC 8058).** Every send also carries the headers
+`List-Unsubscribe: <https://…/unsubscribe/<token>>` and
+`List-Unsubscribe-Post: List-Unsubscribe=One-Click` (built in
+`src/utils/email/ses-client.ts`). This renders the native **Unsubscribe** button
+in Gmail / Apple Mail and is **required by Gmail & Yahoo for bulk senders** —
+without it, campaigns risk the spam folder. The mail provider sends a cookieless
+`POST` (body `List-Unsubscribe=One-Click`) to the same `/unsubscribe/<token>`
+page, which opts the address out; it isn't CSRF-blocked because
+`security.checkOrigin` is off (see the SNS webhook note). The `List-Unsubscribe`
+URL must be **absolute** — for cron-triggered scheduled campaigns (no request
+origin) it falls back to `DEFAULT_PUBLIC_URL`; set `PUBLIC_SITE_URL` to override.
+One-click only takes full effect once the domain's DKIM/DMARC is verified, since
+the header must be on an authenticated message.
+
 ## Abuse protection
 
 The public `POST /api/waitlist` is rate-limited to **5 signups / 10 min / IP**

@@ -22,7 +22,12 @@ let state: "invalid" | "confirm" | "done" | "already" = subscriber
 		: "confirm"
 	: "invalid";
 
-// POST confirms the opt-out.
+// POST confirms the opt-out. This serves BOTH the on-page "Yes, unsubscribe"
+// form and the RFC 8058 one-click flow: mail providers (Gmail/Yahoo) POST here
+// with body `List-Unsubscribe=One-Click` and no cookies. That works because the
+// token is the credential (no session needed) and CSRF checkOrigin is disabled
+// (astro.config.mjs), so the cross-origin form POST isn't rejected. Any POST to
+// a valid, still-active token opts the subscriber out and returns 200.
 if (Astro.request.method === "POST" && subscriber && state === "confirm") {
 	await db
 		.prepare("UPDATE waitlist SET email_status = 'unsubscribed' WHERE id = ?")

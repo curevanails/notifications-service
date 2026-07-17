@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { ensureEmailSchema } from "../email-db";
-import { createSesClient, sesCredentialsFromEnv } from "./ses-client";
+import { DEFAULT_PUBLIC_URL, createSesClient, sesCredentialsFromEnv } from "./ses-client";
 import { sendCampaignByAudience, type Audience } from "./send-service";
 
 /**
@@ -57,8 +57,11 @@ export async function runDueCampaigns(): Promise<void> {
 		return;
 	}
 
+	// Cron has no request origin, so fall back to the absolute default — an
+	// empty base would yield a relative (invalid) List-Unsubscribe URL.
 	const baseUrl =
-		(typeof envRecord.PUBLIC_SITE_URL === "string" && envRecord.PUBLIC_SITE_URL) || "";
+		(typeof envRecord.PUBLIC_SITE_URL === "string" && envRecord.PUBLIC_SITE_URL) ||
+		DEFAULT_PUBLIC_URL;
 
 	for (const c of campaigns) {
 		// Claim it — only proceed if we flipped it from scheduled → sending.

@@ -66,10 +66,12 @@ export async function sendOne(
 		.bind(logId, recipient.id, template.id, recipient.email)
 		.run();
 
+	const unsubscribeUrl = buildUnsubscribeUrl(baseUrl, recipient.unsubscribe_token);
+
 	const variables: Record<string, unknown> = {
 		name: recipient.name ?? "there",
 		email: recipient.email,
-		unsubscribe_url: buildUnsubscribeUrl(baseUrl, recipient.unsubscribe_token),
+		unsubscribe_url: unsubscribeUrl,
 		...(recipient.discount_code ? { discount_code: recipient.discount_code } : {}),
 		...extraVars,
 	};
@@ -83,6 +85,7 @@ export async function sendOne(
 			html: rendered.html,
 			text: rendered.text,
 			logId,
+			unsubscribeUrl,
 		});
 		await db
 			.prepare(

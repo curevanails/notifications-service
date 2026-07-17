@@ -1,4 +1,4 @@
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { SESv2Client, SendEmailCommand, type MessageHeader } from "@aws-sdk/client-sesv2";
 import { isSuppressed } from "./suppression";
 
 /**
@@ -9,6 +9,14 @@ import { isSuppressed } from "./suppression";
 
 export const FROM_ADDRESS = "CureVà <hello@cureva.vn>";
 export const CONFIGURATION_SET = "cureva-main";
+
+/**
+ * Absolute public origin, used as the last-resort base for unsubscribe links
+ * (email body + the `List-Unsubscribe` header) when neither `PUBLIC_SITE_URL`
+ * nor a request origin is available — e.g. cron-triggered scheduled campaigns.
+ * A `List-Unsubscribe` header MUST be an absolute URL, so this can't be blank.
+ */
+export const DEFAULT_PUBLIC_URL = "https://notify.curevanails.com";
 
 export interface SesCredentials {
 	region: string;
@@ -48,6 +56,26 @@ export interface SendParams {
 	text?: string;
 	/** email_logs.id, surfaced to SES events via the `log_id` tag. */
 	logId: string;
+	/**
+	 * Per-recipient opt-out URL. When set (and absolute), it becomes the
+	 * `List-Unsubscribe` header plus `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+	 * giving the recipient the native one-click Unsubscribe button in Gmail /
+	 * Apple Mail (RFC 8058) — which Gmail & Yahoo require of bulk senders.
+	 */
+	unsubscribeUrl?: string;
+}
+
+/**
+ * The `List-Unsubscribe` / `List-Unsubscribe-Post` header pair for RFC 8058
+ * one-click unsubscribe. Returns [] unless `url` is an absolute http(s) URL,
+ * since an invalid header is worse than none.
+ */
+function unsubscribeHeaders(url: string | undefined): MessageHeader[] {
+	if (!url || !/^https?:\/\//i.test(url)) return [];
+	return [
+		{ Name: "List-Unsubscribe", Value: `<${url}>` },
+		{ Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click" },
+	];
 }
 
 /**
@@ -63,6 +91,8 @@ export async function sendEmail(
 		throw new Error(`Email suppressed: ${params.to}`);
 	}
 
+	const headers = unsubscribeHeaders(params.unsubscribeUrl);
+
 	const result = await client.send(
 		new SendEmailCommand({
 			FromEmailAddress: FROM_ADDRESS,
@@ -74,6 +104,7 @@ export async function sendEmail(
 						Html: { Data: params.html },
 						...(params.text ? { Text: { Data: params.text } } : {}),
 					},
+					...(headers.length ? { Headers: headers } : {}),
 				},
 			},
 			ConfigurationSetName: CONFIGURATION_SET,
