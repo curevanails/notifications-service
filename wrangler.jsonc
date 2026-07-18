@@ -43,8 +43,9 @@
 	"vars": {
 		// The ARN of the SNS topic your SES Configuration Set publishes to. The
 		// /api/webhooks/ses handler rejects any SNS message from a different topic
-		// and refuses to auto-confirm foreign subscriptions. Leave empty to
-		// disable the check (NOT recommended — set this in production).
+		// and refuses to auto-confirm foreign subscriptions. REQUIRED: when this is
+		// empty the webhook fails closed (HTTP 503) and processes no SES events, so
+		// set it to your real topic ARN before relying on bounce/complaint intake.
 		"SES_TOPIC_ARN": "",
 	},
 }

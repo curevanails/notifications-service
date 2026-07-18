@@ -11,3 +11,8 @@
 # the admin area returns 404). ADMIN_USERNAME is optional (defaults to "admin").
 ADMIN_PASSWORD=devpassword
 # ADMIN_USERNAME=admin
+# SESSION_SECRET: dedicated high-entropy key for signing session cookies, kept
+# separate from ADMIN_PASSWORD. Strongly recommended — without it, a captured
+# cookie can be used to brute-force ADMIN_PASSWORD offline. Generate one with:
+#   openssl rand -hex 32
+# SESSION_SECRET=

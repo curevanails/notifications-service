@@ -10,6 +10,11 @@ import { ADMIN_PASSWORD, login } from "./helpers";
 
 test.skip(!ADMIN_PASSWORD, "ADMIN_PASSWORD is not set — the dashboard is disabled.");
 
+// Every test here reads/writes the single global `app_settings.recruit_notify_to`
+// row, so running them in parallel (the local default; CI already pins workers:1)
+// lets one test's save clobber another's between write and read. Force serial.
+test.describe.configure({ mode: "serial" });
+
 test.beforeEach(async ({ page }) => {
 	await login(page);
 });
