@@ -5,7 +5,7 @@ standalone Cloudflare Worker. Sends templated emails (welcome, opening
 announcement, discount codes) to the **waitlist** and tracks
 delivery / bounces / complaints via AWS SES + SNS.
 
-Full design doc: [`docs/EMAIL.md`](docs/EMAIL.md).
+Architecture (diagrams): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · design doc: [`docs/EMAIL.md`](docs/EMAIL.md) · docs index: [`docs/README.md`](docs/README.md).
 
 ## Stack
 
