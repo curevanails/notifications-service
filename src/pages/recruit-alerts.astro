@@ -1,13 +1,13 @@
 ---
 import { env } from "cloudflare:workers";
-import { listRecruitNotifications } from "../utils/recruit-notifications";
+import { listRecruitEmails, recruitKind } from "../utils/recruit-notifications";
 import { RECRUIT_NOTIFY_TO, getSetting, parseRecipients } from "../utils/app-settings";
 
 // Server-rendered, auth-gated by src/middleware.ts (path listed as protected).
 export const prerender = false;
 
 const db = env.DB as D1Database;
-const rows = await listRecruitNotifications(db, 200);
+const rows = await listRecruitEmails(db, 200);
 const recipients = parseRecipients(await getSetting(db, RECRUIT_NOTIFY_TO));
 
 const utc = new Intl.DateTimeFormat("en-US", {
@@ -17,12 +17,13 @@ const utc = new Intl.DateTimeFormat("en-US", {
 	hour: "numeric",
 	minute: "2-digit",
 });
-const fmt = (ms: number) => utc.format(new Date(ms));
+const fmt = (ms: number | null) => (ms ? utc.format(new Date(ms)) : "—");
 
 const badge: Record<string, string> = {
 	sent: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
+	delivered: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
 	failed: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
-	skipped: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+	queued: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
 };
 ---
 
@@ -94,6 +95,7 @@ const badge: Record<string, string> = {
 							<thead>
 								<tr class="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400 dark:border-gray-800">
 									<th class="px-5 py-3 font-medium">Candidate</th>
+									<th class="px-5 py-3 font-medium">Type</th>
 									<th class="px-5 py-3 font-medium">When</th>
 									<th class="px-5 py-3 font-medium">Sent to</th>
 									<th class="px-5 py-3 font-medium">Status</th>
@@ -102,15 +104,16 @@ const badge: Record<string, string> = {
 							<tbody>
 								{rows.map((r) => (
 									<tr class="border-b border-gray-50 last:border-0 dark:border-gray-800/60">
-										<td class="px-5 py-3.5 font-medium text-gray-900 dark:text-white/90">{r.candidate_name}</td>
-										<td class="px-5 py-3.5 whitespace-nowrap text-gray-500 dark:text-gray-400">{fmt(r.created_at)}</td>
-										<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400">{r.recipients ?? "—"}</td>
+										<td class="px-5 py-3.5 font-medium text-gray-900 dark:text-white/90">{r.candidate_name ?? "—"}</td>
+										<td class="px-5 py-3.5 whitespace-nowrap text-gray-500 dark:text-gray-400">{recruitKind(r.template_id)}</td>
+										<td class="px-5 py-3.5 whitespace-nowrap text-gray-500 dark:text-gray-400">{fmt(r.sent_at)}</td>
+										<td class="px-5 py-3.5 text-gray-500 dark:text-gray-400">{r.recipient ?? "—"}</td>
 										<td class="px-5 py-3.5">
 											<span class={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badge[r.status] ?? "bg-gray-100 text-gray-600"}`}>
 												{r.status}
 											</span>
-											{r.error && (
-												<span class="mt-1 block max-w-xs truncate text-xs text-gray-400" title={r.error}>{r.error}</span>
+											{r.error_message && (
+												<span class="mt-1 block max-w-xs truncate text-xs text-gray-400" title={r.error_message}>{r.error_message}</span>
 											)}
 										</td>
 									</tr>
