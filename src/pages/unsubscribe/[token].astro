@@ -46,6 +46,9 @@ const maskedEmail = subscriber?.email ?? "";
 		<meta charset="utf-8" />
 		<meta content="width=device-width, initial-scale=1.0" name="viewport" />
 		<meta name="robots" content="noindex, nofollow" />
+		<!-- The URL contains the secret unsubscribe token; never leak it in the
+		     Referer header of the Google Fonts (or any) sub-request. -->
+		<meta name="referrer" content="no-referrer" />
 		<title>Unsubscribe · CureVà</title>
 		<link
 			href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&display=swap"

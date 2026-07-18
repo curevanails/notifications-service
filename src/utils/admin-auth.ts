@@ -42,11 +42,22 @@ async function sign(secret: string, data: string): Promise<string> {
  * could brute-force the password offline. Falls back to `ADMIN_PASSWORD` when
  * `SESSION_SECRET` is unset so existing deployments keep working unchanged.
  */
+let warnedSessionSecretFallback = false;
+
 export function resolveSessionSecret(
 	adminPassword: string,
 	sessionSecret: string | undefined,
 ): string {
-	return sessionSecret && sessionSecret.length > 0 ? sessionSecret : adminPassword;
+	if (sessionSecret && sessionSecret.length > 0) return sessionSecret;
+	if (!warnedSessionSecretFallback) {
+		warnedSessionSecretFallback = true;
+		console.warn(
+			"SESSION_SECRET is not set — signing session cookies with ADMIN_PASSWORD. " +
+				"Set a dedicated high-entropy SESSION_SECRET so a captured cookie cannot be " +
+				"used to brute-force the login password offline.",
+		);
+	}
+	return adminPassword;
 }
 
 /** Length-safe string comparison to avoid leaking via timing. */

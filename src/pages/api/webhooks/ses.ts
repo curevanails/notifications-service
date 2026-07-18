@@ -46,26 +46,27 @@ export const POST: APIRoute = async ({ request }) => {
 
 	// A valid signature only proves *some* AWS SNS topic signed the message, not
 	// that it is OUR topic. Without this check an attacker could point their own
-	// SNS topic at this public endpoint and publish forged SES events. When
-	// `SES_TOPIC_ARN` is configured, require an exact match.
+	// SNS topic at this public endpoint and publish forged SES events (fake
+	// bounces/complaints that suppress real subscribers). Fail *closed*: if
+	// `SES_TOPIC_ARN` is not configured we cannot attribute the topic, so we
+	// refuse every message rather than trusting an unverifiable sender.
 	const expectedTopic = (
 		env as unknown as Record<string, string | undefined>
 	).SES_TOPIC_ARN?.trim();
-	if (expectedTopic && sns.TopicArn !== expectedTopic) {
+	if (!expectedTopic) {
+		console.error(
+			"SES webhook rejected: SES_TOPIC_ARN is not configured. Set it to the SNS topic ARN so forged SES events cannot be accepted.",
+		);
+		return new Response("Webhook not configured", { status: 503 });
+	}
+	if (sns.TopicArn !== expectedTopic) {
 		return new Response("Untrusted topic", { status: 403 });
 	}
 
 	// Auto-confirm the subscription by visiting the one-time SubscribeURL.
-	// Only do this for our own topic — otherwise confirming an attacker-owned
-	// subscription would wire this webhook up to their topic. If `SES_TOPIC_ARN`
-	// is unset we can't tell whose topic this is, so we refuse to auto-confirm.
+	// Reaching here means the message is signed by AWS and its TopicArn matches
+	// our configured `SES_TOPIC_ARN`, so confirming can only wire up our topic.
 	if (sns.Type === "SubscriptionConfirmation") {
-		if (!expectedTopic) {
-			console.warn(
-				"SNS SubscriptionConfirmation ignored: set SES_TOPIC_ARN to enable auto-confirm",
-			);
-			return new Response("OK");
-		}
 		if (!isValidSnsUrl(sns.SubscribeURL)) {
 			return new Response("Bad SubscribeURL", { status: 400 });
 		}
@@ -93,7 +94,10 @@ export const POST: APIRoute = async ({ request }) => {
 		.prepare("SELECT id, email FROM email_logs WHERE ses_message_id = ?")
 		.bind(messageId)
 		.first<{ id: string; email: string }>();
-	if (!log) return new Response("Not found", { status: 404 });
+	// The event is signed and from our topic but references a messageId we have
+	// no log for (send/log race, or mail sent outside this system). Ack with 200
+	// so SNS treats it as delivered instead of retrying for up to 21 days.
+	if (!log) return new Response("OK");
 
 	const now = Date.now();
 	const eventType = event.eventType ?? event.notificationType;
